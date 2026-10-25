@@ -72,8 +72,14 @@ node cli/wp-brain.mjs report --days 7                       # week report, Markd
 In the extension, Brain entries also show on the **Learnings** page (and count towards "keeps coming back"),
 and on each ticket's page; an entry whose ticket is not saved yet has **+ new ticket**.
 
-For the brief to appear by itself when a Claude Code session starts on a ticket branch (`fix/pay-2433-…`), add a
-SessionStart hook: `node /path/to/cli/wp-brain.mjs hook` (silent when nothing is recorded).
+Two optional Claude Code hooks make it automatic:
+
+| Hook | Command | Effect |
+|---|---|---|
+| SessionStart | `node /path/to/cli/wp-brain.mjs hook` | The brief for the branch's ticket (`fix/pay-2433-…`) and repo, as context; silent when nothing is recorded |
+| Stop | `node /path/to/cli/wp-brain.mjs stop-check` | Once per session, after a commit on a ticket branch with nothing recorded, asks Claude to record the session |
+
+The brief also reads what you wrote on the extension's Learnings page, from its daily backup on the same branch.
 
 To use the Claude Code skill, link it into your skills folder and set the path to `cli/wp-brain.mjs` in
 `SKILL.md`:

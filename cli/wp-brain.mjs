@@ -22,6 +22,8 @@
 //   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N]
 //   wp-brain report [--days 7] [--scope S]
 //   wp-brain inbox [--ack ID]
+//   wp-brain hook         (Claude Code SessionStart hook: the brief for this branch, as context)
+//   wp-brain stop-check   (Claude Code Stop hook: once per session, ask to record committed work)
 //   wp-brain sync
 //
 // Writing pushes at once unless --no-push. Nothing that looks like a secret is
@@ -104,12 +106,63 @@ function commitAndPush(cfg, paths, message, push = true) {
 function readAll(cfg) {
 	const files = {}
 	const dir = join(cfg.clone, ROOT, 'entries')
-	if (!existsSync(dir)) return []
-	for (const month of readdirSync(dir)) {
-		const m = join(dir, month)
-		for (const f of readdirSync(m).filter((f) => f.endsWith('.jsonl'))) files[`${ROOT}/entries/${month}/${f}`] = readFileSync(join(m, f), 'utf8')
+	if (existsSync(dir)) {
+		for (const month of readdirSync(dir)) {
+			const m = join(dir, month)
+			for (const f of readdirSync(m).filter((f) => f.endsWith('.jsonl'))) files[`${ROOT}/entries/${month}/${f}`] = readFileSync(join(m, f), 'utf8')
+		}
 	}
-	return fold(files)
+	return [...fold(files), ...fromBackup(cfg)].sort((a, b) => b.at - a.at)
+}
+
+/**
+ * What you wrote in the extension's Learnings page, as the extension's daily
+ * backup left it on the same branch (`workpulse/data/learnings/<month>.json`).
+ * Read-only from here: those files belong to the backup. Each line keeps its
+ * ticket by key, looked up through the backed-up tickets.
+ */
+function fromBackup(cfg) {
+	const base = join(cfg.clone, cfg.backupDir || 'workpulse', 'data')
+	const learnDir = join(base, 'learnings')
+	if (!existsSync(learnDir)) return []
+	const keyOf = {}
+	const ticketDir = join(base, 'tickets')
+	if (existsSync(ticketDir)) {
+		for (const f of readdirSync(ticketDir).filter((f) => f.endsWith('.json'))) {
+			try {
+				const t = JSON.parse(readFileSync(join(ticketDir, f), 'utf8'))
+				const key = String(t.name ?? '').match(/\b([A-Z][A-Z0-9]{1,9})-(\d{1,6})\b/)?.[0]
+				if (t.id && key) keyOf[t.id] = key
+			} catch {
+				/* a half-written shard is skipped, not fatal */
+			}
+		}
+	}
+	const out = []
+	for (const f of readdirSync(learnDir).filter((f) => f.endsWith('.json'))) {
+		let list = []
+		try {
+			list = JSON.parse(readFileSync(join(learnDir, f), 'utf8'))
+		} catch {
+			continue
+		}
+		for (const l of Array.isArray(list) ? list : []) {
+			if (!l?.id || !l.text) continue
+			out.push({
+				schema: 'workpulse.bridge.entry/1',
+				id: `journal:${l.id}`,
+				at: Number(l.at) || Date.parse(l.date) || 0,
+				device: 'extension-learnings',
+				kind: l.kind === 'mistake' ? 'mistake' : 'learning',
+				scope: 'work',
+				title: String(l.text).split('\n')[0].slice(0, 200),
+				body: String(l.text).includes('\n') ? l.text : undefined,
+				tags: Array.isArray(l.tags) ? l.tags : [],
+				ticket: l.ticketId ? keyOf[l.ticketId] : undefined,
+			})
+		}
+	}
+	return out
 }
 
 function die(msg) {
@@ -258,24 +311,14 @@ const commands = {
 	 */
 	hook() {
 		if (!existsSync(CONFIG)) return
-		let cwd = process.cwd()
-		try {
-			const input = JSON.parse(readFileSync(0, 'utf8') || '{}')
-			if (typeof input.cwd === 'string') cwd = input.cwd
-		} catch {
-			/* no stdin: use the current folder */
-		}
-		const here = (...a) => {
-			try {
-				return execFileSync('git', ['-C', cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-			} catch {
-				return ''
-			}
-		}
-		const branch = here('branch', '--show-current')
+		const { cwd, session, branch, key, remote, head } = sessionContext()
 		if (!branch) return
-		const key = branch.match(/\b([a-z]{2,10})-(\d{1,6})\b/i)?.slice(1, 3).join('-').toUpperCase()
-		const remote = here('remote', 'get-url', 'origin').match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1]
+		// Remember where this session started, so the stop check can tell whether
+		// it shipped anything and whether that was recorded.
+		if (session) {
+			mkdirSync(SESSIONS, { recursive: true })
+			writeFileSync(join(SESSIONS, `${session}.json`), JSON.stringify({ at: Date.now(), cwd, branch, key, head }) + '\n')
+		}
 		const cfg = config()
 		pull(cfg)
 		const all = readAll(cfg)
@@ -286,6 +329,38 @@ const commands = {
 		const lines = briefLines(cfg, all, key, project)
 		const text = [`WorkPulse Brain — what was recorded before for ${[key, project].filter(Boolean).join(' / ')} (read it before planning; record mistakes and the session with the workpulse-brain skill):`, '', ...lines].join('\n')
 		process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text.slice(0, 8000) } }))
+	},
+
+	/**
+	 * For a Claude Code Stop hook: when a session on a ticket branch has
+	 * committed since it began, and nothing has been recorded for that ticket
+	 * since then, ask Claude — once per session — to record it with the
+	 * workpulse-brain skill before stopping. Everything else is silent:
+	 * no brain, no ticket branch, no new commits, already recorded, already
+	 * asked, or Claude is already answering a stop hook.
+	 *
+	 * A commit is the line: work that has not been committed is not finished, and
+	 * asking at every pause would be nagging.
+	 */
+	'stop-check'() {
+		if (!existsSync(CONFIG)) return
+		const { session, key, head, input } = sessionContext()
+		if (!session || !key || input.stop_hook_active) return
+		const markPath = join(SESSIONS, `${session}.json`)
+		if (!existsSync(markPath)) return
+		const mark = JSON.parse(readFileSync(markPath, 'utf8'))
+		if (mark.asked || !head || head === mark.head || mark.key !== key) return
+		const cfg = config()
+		pull(cfg)
+		const recorded = readAll(cfg).some((e) => e.ticket === key && e.at >= mark.at)
+		if (recorded) return
+		writeFileSync(markPath, JSON.stringify({ ...mark, asked: Date.now() }) + '\n')
+		process.stdout.write(
+			JSON.stringify({
+				decision: 'block',
+				reason: `This session committed work on ${key} and nothing is recorded in the WorkPulse Brain for it yet. Before stopping, use the workpulse-brain skill: write one ticket entry for ${key} (asked, done, root cause, honest status, next, PR/commits) plus any mistakes and learnings from this session with \`node ${fileURLToPath(import.meta.url)} add --json -\`. If this was trivial, say so in one line instead and stop.`,
+			}),
+		)
 	},
 
 	list({ opt }) {
@@ -335,6 +410,32 @@ const commands = {
 	help() {
 		console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(0, 30).map((l) => l.slice(3)).join('\n'))
 	},
+}
+
+/** Where session markers live: one small file per Claude Code session. */
+const SESSIONS = process.env.WP_BRAIN_SESSIONS || join(homedir(), '.workpulse', 'sessions')
+
+/** The hook's stdin, and the git facts of the folder it ran in. */
+function sessionContext() {
+	let input = {}
+	try {
+		input = JSON.parse(readFileSync(0, 'utf8') || '{}')
+	} catch {
+		/* no stdin */
+	}
+	const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd()
+	const here = (...a) => {
+		try {
+			return execFileSync('git', ['-C', cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+		} catch {
+			return ''
+		}
+	}
+	const branch = here('branch', '--show-current')
+	const key = branch.match(/\b([a-z]{2,10})-(\d{1,6})\b/i)?.slice(1, 3).join('-').toUpperCase()
+	const remote = here('remote', 'get-url', 'origin').match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1]
+	const session = typeof input.session_id === 'string' && /^[\w-]+$/.test(input.session_id) ? input.session_id : null
+	return { input, cwd, branch, key, remote, head: here('rev-parse', 'HEAD'), session }
 }
 
 /** The brief: earlier entries for a ticket and project, repeat mistakes, open follow-ups, the inbox. */

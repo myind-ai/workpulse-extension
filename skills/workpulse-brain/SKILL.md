@@ -20,6 +20,13 @@ set in the extension's Settings → Backup (set the Branch there **before** pick
 If the session already began with a "WorkPulse Brain — what was recorded before…" block (the SessionStart hook,
 `node $WP hook`), that is the brief: read it and skip step 2 below.
 
+If a Stop hook says "This session committed work on KEY and nothing is recorded…" (`node $WP stop-check`),
+do the end-of-ticket step below now, then stop. It asks only once per session; if the work was trivial, say so
+in one line instead.
+
+The brief also includes what the user wrote on the extension's Learnings page (from its daily backup under
+`workpulse/data/`). Never write there: `bridge/` only.
+
 ## Before starting a ticket or a side-project task
 
 1. Find the key: from the branch (`git branch --show-current` → `fix/pay-2433-…` → `PAY-2433`), the user's message, or the project name for personal work.
