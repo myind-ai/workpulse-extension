@@ -14,7 +14,7 @@
 // never disagree about what an entry is.
 //
 // Usage (see `wp-brain help`):
-//   wp-brain init owner/repo [--clone DIR] [--device NAME]
+//   wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]
 //   wp-brain add <kind> "title" [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
@@ -75,8 +75,8 @@ const git = (cfg, ...args) => execFileSync('git', ['-C', cfg.clone, ...args], { 
 
 function pull(cfg) {
 	try {
-		// An empty repository has nothing to pull yet.
-		if (git(cfg, 'ls-remote', '--heads', 'origin')) git(cfg, 'pull', '--rebase', '--quiet')
+		// An empty repository, or a branch nobody has pushed yet, has nothing to pull.
+		if (git(cfg, 'ls-remote', '--heads', 'origin', ...(cfg.branch ? [cfg.branch] : []))) git(cfg, 'pull', '--rebase', '--quiet')
 	} catch (e) {
 		console.error(`(pull failed, using what is here: ${String(e.stderr || e.message).trim().split('\n')[0]})`)
 	}
@@ -143,9 +143,27 @@ The extension's backup folder (\`workpulse/\`) is never written from here.
 const commands = {
 	init({ pos, opt }) {
 		const repo = pos[0]
-		if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) die('Usage: wp-brain init owner/repo [--clone DIR] [--device NAME]')
+		if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) die('Usage: wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]')
 		const clone = opt.clone || join(homedir(), '.workpulse', 'brain')
 		const device = opt.device || `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`
+		const branch = typeof opt.branch === 'string' ? opt.branch : null
+		if (branch && !existsSync(join(clone, '.git'))) {
+			// One branch of a repository you already have — e.g. a `brain` branch of
+			// a private code repository — holds only the brain: never a full clone of
+			// the code. An existing branch is checked out; a missing one starts empty.
+			mkdirSync(clone, { recursive: true })
+			const g = (...a) => execFileSync('git', ['-C', clone, ...a], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
+			g('init', '-q', '-b', branch)
+			g('remote', 'add', 'origin', `https://github.com/${repo}.git`)
+			try {
+				g('fetch', '-q', 'origin', branch)
+				g('checkout', '-q', '-B', branch, '--track', `origin/${branch}`)
+			} catch {
+				// No such branch yet: the first commit below creates it, with tracking.
+				g('config', `branch.${branch}.remote`, 'origin')
+				g('config', `branch.${branch}.merge`, `refs/heads/${branch}`)
+			}
+		}
 		if (!existsSync(join(clone, '.git'))) {
 			mkdirSync(dirname(clone), { recursive: true })
 			// gh uses whatever login you already have; plain git is the fallback.
@@ -155,7 +173,7 @@ const commands = {
 				execFileSync('git', ['clone', '--quiet', `https://github.com/${repo}.git`, clone], { stdio: 'inherit' })
 			}
 		}
-		const cfg = { repo, clone, device }
+		const cfg = { repo, clone, device, ...(branch ? { branch } : {}) }
 		mkdirSync(dirname(CONFIG), { recursive: true })
 		writeFileSync(CONFIG, JSON.stringify(cfg, null, 2) + '\n')
 		const doc = join(clone, ROOT, 'SCHEMA.md')
@@ -164,7 +182,8 @@ const commands = {
 			writeFileSync(doc, SCHEMA_DOC)
 			commitAndPush(cfg, [`${ROOT}/SCHEMA.md`], 'bridge: describe the folder', !opt['no-push'])
 		}
-		console.log(`Ready. ${repo} cloned at ${clone}; this machine writes as ${device}.\nConfig: ${CONFIG}`)
+		console.log(`Ready. ${repo}${branch ? ` (branch ${branch})` : ''} at ${clone}; this machine writes as ${device}.\nConfig: ${CONFIG}`)
+		if (branch) console.log(`In the extension: Settings → Backup → repository ${repo}, branch ${branch}.`)
 	},
 
 	add({ pos, opt }) {

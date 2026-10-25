@@ -13,7 +13,9 @@ WP=~/path/to/workpulse-extension/cli/wp-brain.mjs   # set to your checkout
 node $WP help
 ```
 
-First time on a machine (once): `node $WP init owner/repo` — the same repo set in the extension's Settings → Backup.
+First time on a machine (once): `node $WP init owner/repo [--branch brain]`, using the same repository and branch
+set in the extension's Settings → Backup (set the Branch there **before** picking the repository). If
+`~/.config/workpulse/brain.json` exists, it is already done.
 
 ## Before starting a ticket or a side-project task
 

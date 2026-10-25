@@ -62,6 +62,7 @@ bridge/inbox/acks/<device>/*.json         the CLI saying it picked one up
 
 ```bash
 node cli/wp-brain.mjs init you/your-private-notes-repo      # once per machine (Node ≥ 22.18)
+node cli/wp-brain.mjs init you/a-private-repo --branch brain  # or: a branch of a repo you already have
 node cli/wp-brain.mjs brief PAY-2433                        # before a ticket
 node cli/wp-brain.mjs add mistake "Patched one path #forms" --ticket PAY-2433 --root-cause "…"
 node cli/wp-brain.mjs add --json - < session.json           # a whole ticket at the end

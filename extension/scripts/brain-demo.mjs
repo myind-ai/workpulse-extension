@@ -24,6 +24,8 @@ const EXT = resolve('.output/chrome-mv3')
 const CLONE = resolve(process.argv[2] ?? '.')
 const OUT = resolve(process.argv[3] ?? '../docs/screenshots/brain')
 const REAL = process.env.WP_GH_REPO && process.env.WP_GH_TOKEN ? { repo: process.env.WP_GH_REPO, branch: process.env.WP_GH_BRANCH ?? '', token: process.env.WP_GH_TOKEN } : null
+// Look, do not touch: for checking a real brain without adding to it.
+const READ_ONLY = !!REAL && process.env.WP_READ_ONLY === '1'
 mkdirSync(OUT, { recursive: true })
 
 // ── the stand-in repository ────────────────────────────────────────────────
@@ -94,7 +96,8 @@ const ext = (p) => `chrome-extension://${extId}/${p}`
 await sw.evaluate(
 	async (t) => {
 		const { settings = {} } = await chrome.storage.local.get('settings')
-		await chrome.storage.local.set({ settings: { ...settings, syncRepo: t.repo, syncBranch: t.branch }, syncToken: t.token })
+		// The daily backup is off: this throwaway profile has nothing worth backing up.
+		await chrome.storage.local.set({ settings: { ...settings, syncRepo: t.repo, syncBranch: t.branch, syncDaily: false }, syncToken: t.token })
 	},
 	REAL ?? { repo: 'you/workpulse-notes', branch: '', token: 'stand-in-token' },
 )
@@ -107,7 +110,8 @@ const shot = async (name) => {
 }
 const bridgeState = () => sw.evaluate(async () => (await chrome.storage.local.get('runtime')).runtime?.bridge ?? {})
 
-try {
+// The run, as a function so the read-only check can stop early.
+const main = async () => {
 	if (!REAL) {
 		// Empty states first, before anything is logged: Tick on each.
 		for (const [view, name] of [
@@ -144,6 +148,14 @@ try {
 		const more = page.getByRole('button', { name: 'more' }).first()
 		if (await more.count()) await more.click()
 		await shot('06-brain-ticket-detail')
+	}
+
+	if (READ_ONLY) {
+		const got = await page.evaluate(() => chrome.runtime.sendMessage({ wp: 'call', method: 'bridge', args: [] }))
+		console.log(`read-only: ${got.result.entries.length} entries, ${got.result.summary.projects.map((p) => p.name).join(', ')}`)
+		await page.getByRole('button', { name: 'Personal', exact: true }).click()
+		await shot('real-brain-personal')
+		return
 	}
 
 	// Write one entry from the extension.
@@ -186,6 +198,9 @@ try {
 		console.log(`extension wrote: ${written.join(', ') || 'nothing'}`)
 		console.log(`requests: ${log.length} (${log.filter((l) => l.includes('/git/trees/')).length} tree reads)`)
 	}
+}
+try {
+	await main()
 } finally {
 	await ctx.close()
 	// The profile held the token: it does not outlive the run.
