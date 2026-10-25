@@ -83,3 +83,5 @@ node $WP list --kind mistake --query forms
 | `Committed locally but could not push` | `node $WP sync`; check `gh auth status` |
 | Extension does not show new entries | Brain page → **Sync now** (it also polls every minute while open, every 15 min otherwise) |
 | Extension says "Connect a repository first" | Settings → Backup needs the repo and a fine-grained token with Contents: Read and write |
+| Two quick saves from the extension, one is missing | GitHub sends Cache-Control max-age=60; a cached read before an append drops a line. lib/github.ts sends every call with cache: no-store; keep it that way |
+| Save from the Brain page spins for a while on first setup | It queues behind the daily backup, which runs the first time a repository is set after 19:00. Wait; it completes |
