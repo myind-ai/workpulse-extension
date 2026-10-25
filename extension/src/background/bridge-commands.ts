@@ -8,7 +8,7 @@
 // files whose sha moved are fetched. Writing is one commit to a file only this
 // browser writes, so nothing anybody else wrote can be overwritten.
 
-import { appendLine, changedFiles, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type InboxMessage, type Summary } from '@/core/bridge'
+import { appendLine, changedFiles, devicesOf, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type Device, type InboxMessage, type Summary } from '@/core/bridge'
 import { enabled } from '@/core/features'
 import { parseRepo } from '@/core/sync'
 import { GitHub } from '@/lib/github'
@@ -20,7 +20,12 @@ export interface BridgeView {
 	/** Set up enough to read: a repository and a token. */
 	ready: boolean
 	repo: string
+	/** The branch backups and the bridge use; empty means the repository's default. */
+	branch: string
+	hasToken: boolean
 	device: string
+	/** Everyone who has written to the bridge: Claude Code machines and browsers. */
+	devices: Device[]
 	polledAt?: number
 	error?: string
 	entries: BridgeEntry[]
@@ -52,7 +57,10 @@ export class BridgeCommands extends PageCommands {
 			on: enabled('BRIDGE_SYNC'),
 			ready: !!parseRepo(s.syncRepo) && !!token,
 			repo: s.syncRepo,
+			branch: s.syncBranch.trim(),
+			hasToken: !!token,
 			device,
+			devices: devicesOf(entries),
 			polledAt: rt.bridge?.polledAt,
 			error: rt.bridge?.error,
 			entries,
@@ -143,6 +151,41 @@ export class BridgeCommands extends PageCommands {
 	async brainTickets(keys: string[]): Promise<Record<string, string | null>> {
 		const found = await this.ticketsForKeys([...new Set(keys)])
 		return Object.fromEntries(found.map((t) => [t.key, t.ticketId ?? null]))
+	}
+
+	/**
+	 * A new learning or mistake goes to the Brain as well as to this browser, so
+	 * Claude reads it in the next brief rather than after tonight's backup. In
+	 * the background: saving never waits on GitHub, and a failed copy is caught
+	 * up by the daily backup, which the CLI reads too. It keeps the learning's id
+	 * (`journal:<id>`), so the two copies are one line everywhere they are read.
+	 * Edits stay local: the Brain is append-only.
+	 */
+	override async saveLearning(input: Parameters<PageCommands['saveLearning']>[0]) {
+		const saved = await super.saveLearning(input)
+		if (!input.id) void this.mirrorLearning(saved).catch((e) => this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, error: `Learning not copied to the Brain: ${(e as Error).message}` })))
+		return saved
+	}
+
+	private async mirrorLearning(l: Awaited<ReturnType<PageCommands['saveLearning']>>): Promise<void> {
+		if (!enabled('BRIDGE_SYNC')) return
+		const gh = await this.bridgeGithub()
+		if (!gh) return
+		const space = l.ticketId ? (await this.store.workspaces()).find((w) => w.id === l.ticketId) : undefined
+		const ticket = space?.name.match(/\b([A-Z][A-Z0-9]{1,9})-(\d{1,6})\b/)?.[0]
+		const [device, now] = [await this.device(), this.now()]
+		let entry: BridgeEntry
+		try {
+			entry = { ...newEntry({ kind: l.kind === 'mistake' ? 'mistake' : 'learning', scope: 'work', title: l.text.split('\n')[0].slice(0, 200), body: l.text.includes('\n') ? l.text : undefined, ticket, tags: l.tags }, device, now), id: `journal:${l.id}` }
+		} catch {
+			return // shaped like a secret: it stays on this machine
+		}
+		const path = entriesPath(now, device)
+		const existing = await gh.read(path)
+		const text = appendLine(existing?.text ?? null, entry)
+		await gh.commit([{ path, content: text }], `bridge: ${entry.kind} — ${entry.title.slice(0, 60)}`)
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, files: { ...r.bridge?.files, [path]: text }, etag: undefined }))
+		this.env.ui.changed()
 	}
 
 	/** Ask whatever reads the inbox — the CLI skill — to do something. */

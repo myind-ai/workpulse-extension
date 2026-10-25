@@ -179,6 +179,12 @@ const main = async () => {
 		await page.waitForTimeout(1500)
 		await shot('10-learnings-with-claude-code')
 
+		// A learning written here reaches the Brain at once, not after tonight's backup.
+		const saved = await page.evaluate(() => chrome.runtime.sendMessage({ wp: 'call', method: 'saveLearning', args: [{ text: 'Mirror check: a learning from the Learnings page #bridge', kind: 'learning' }] }))
+		await page.waitForTimeout(2500)
+		const mirrored = Object.values(files).some((t) => String(t).includes(`"id":"journal:${saved.result.id}"`))
+		console.log(`learning copied to the Brain: ${mirrored ? 'yes' : 'NO'}`)
+
 		// A Brain entry whose ticket is not saved yet: start it, land on its page.
 		await page.goto(ext('dashboard.html#/brain'))
 		await page.waitForTimeout(1500)
@@ -190,6 +196,23 @@ const main = async () => {
 			await shot('11-ticket-started-from-brain')
 			console.log(`new ticket opened at ${new URL(page.url()).hash}`)
 		} else console.log('no "+ new ticket" button found')
+
+		// Settings → Claude Code & the Brain: the link, step by step, and the commands.
+		await page.goto(ext('dashboard.html#/settings/claude'))
+		await page.waitForTimeout(1200)
+		const panel = page.locator('details.wp-panel', { hasText: 'Claude Code & the Brain' })
+		if (!(await panel.evaluate((d) => d.open))) await panel.locator('summary').click()
+		await panel.scrollIntoViewIfNeeded()
+		await page.waitForTimeout(600)
+		await panel.screenshot({ path: join(OUT, '12-settings-claude-code.png') })
+		console.log('shot 12-settings-claude-code.png')
+		const useBrain = panel.getByRole('button', { name: /Use a brain branch/ })
+		if (await useBrain.count()) {
+			await useBrain.click()
+			await page.waitForTimeout(1000)
+			const branch = await sw.evaluate(async () => (await chrome.storage.local.get('settings')).settings?.syncBranch)
+			console.log(`"Use a brain branch" set syncBranch to: ${branch}`)
+		}
 	}
 
 	const errors = await page.locator('.wp-banner').allTextContents()

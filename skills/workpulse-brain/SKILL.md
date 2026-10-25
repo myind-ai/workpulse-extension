@@ -13,9 +13,34 @@ WP=~/path/to/workpulse-extension/cli/wp-brain.mjs   # set to your checkout
 node $WP help
 ```
 
-First time on a machine (once): `node $WP init owner/repo [--branch brain]`, using the same repository and branch
-set in the extension's Settings → Backup (set the Branch there **before** picking the repository). If
-`~/.config/workpulse/brain.json` exists, it is already done.
+How the whole flow works: `docs/guides/brain-flow-and-next-steps.md` in the WorkPulse repo.
+
+## Setup — check first, then ask, never assume
+
+Run `node $WP doctor` the first time this skill is used in a session (it is fast and changes nothing).
+If it reports **Config missing**, or the user asks to set up / re-link / change the Brain, **ask before
+installing anything**, with AskUserQuestion (all in one call):
+
+| Question | Options (first is recommended) |
+|---|---|
+| Where should the Brain live? | **A `brain` branch of an existing private repo** (name it) · A separate private repo (name it) · Cancel |
+| What should run automatically? (multi-select) | **Brief at session start** (SessionStart hook) · **Ask to record after a commit** (Stop hook) |
+| Install the global rule and the skill? (multi-select) | **Add the WorkPulse Brain rule to ~/.claude/CLAUDE.md** · **Link this skill into ~/.claude/skills** |
+| This machine's name in the Brain | **cli-<hostname>** (default) · Other |
+
+The repository and branch must match the extension's **Settings → Backup** (Repository, and Branch under
+"Where in the repository"); the extension's **Settings → Claude Code & the Brain** panel shows them and the exact
+command. Then hand the user **one** command to run themselves. It edits `~/.claude/settings.json` and `CLAUDE.md`,
+which Claude Code may not do on its own:
+
+```bash
+! node $WP setup --repo owner/repo --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
+```
+
+Afterwards run `node $WP doctor` and read it back: every ✓/!/✗ line, and what each `!` means. `setup` can be
+re-run any time; it replaces its own hooks and rule and never touches anything else, and it keeps
+`.wp-brain.bak` copies. The GitHub token is only ever pasted into the extension (fine-grained, Contents:
+Read and write, that one repository, with an expiry). The CLI uses the user's own `gh`/git login and stores no token.
 
 If the session already began with a "WorkPulse Brain — what was recorded before…" block (the SessionStart hook,
 `node $WP hook`), that is the brief: read it and skip step 2 below.

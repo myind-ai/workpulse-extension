@@ -248,6 +248,45 @@ export function newEntry(input: Omit<BridgeEntry, 'schema' | 'id' | 'at' | 'devi
 /** The device's file with one more line on the end. */
 export const appendLine = (existing: string | null, e: BridgeEntry) => `${existing ? existing.replace(/\n*$/, '\n') : ''}${JSON.stringify(e)}\n`
 
+// ── linking ─────────────────────────────────────────────────────────────────
+
+export interface Device {
+	device: string
+	/** `cli` for Claude Code and the wp-brain tool, `ext` for a browser. */
+	kind: 'cli' | 'ext' | 'other'
+	count: number
+	last: number
+}
+
+/** Every device that has written to the bridge, most recent first: the proof that linking worked. */
+export function devicesOf(entries: BridgeEntry[]): Device[] {
+	const by = new Map<string, Device>()
+	for (const e of entries) {
+		const d = by.get(e.device) ?? { device: e.device, kind: e.device.startsWith('cli-') ? 'cli' : e.device.startsWith('ext-') ? 'ext' : 'other', count: 0, last: 0 }
+		d.count++
+		d.last = Math.max(d.last, e.at)
+		by.set(e.device, d)
+	}
+	return [...by.values()].sort((a, b) => b.last - a.last)
+}
+
+/** Where the open-source CLI and skill live, for a machine that has neither yet. */
+export const SOURCE_REPO = 'https://github.com/myind-ai/workpulse-extension'
+
+/**
+ * The commands that link Claude Code on a machine to this repository and
+ * branch. `setup` asks for everything else (device name, hooks, the global
+ * rule) and installs it; `doctor` says what is and is not linked.
+ */
+export function setupCommands(repo: string, branch: string, dir = '~/workpulse-extension'): { clone: string; setup: string; doctor: string } {
+	const cli = `node ${dir}/cli/wp-brain.mjs`
+	return {
+		clone: `git clone ${SOURCE_REPO}.git ${dir}`,
+		setup: `${cli} setup --repo ${repo}${branch ? ` --branch ${branch}` : ''}`,
+		doctor: `${cli} doctor`,
+	}
+}
+
 /** Which files under bridge/ moved since last time, by blob sha. */
 export function changedFiles(seen: Record<string, string>, tree: { path: string; sha: string }[]): { fetch: string[]; shas: Record<string, string> } {
 	const shas: Record<string, string> = {}

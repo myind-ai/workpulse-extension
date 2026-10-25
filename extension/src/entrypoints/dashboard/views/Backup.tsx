@@ -353,6 +353,21 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 							This writes everything WorkPulse knows to <strong>{state.repo || 'your repository'}</strong>: your learnings and mistakes, your tickets with their links and
 							notes, your time logs, and a page for each day. After this it happens on its own, once a day.
 						</p>
+						{/* Said here, before the first write: a repository that also holds
+						    code should not get notes on its main branch by default. */}
+						<div className="wp-row-wrap wp-small">
+							<span>
+								Branch: <code>{settings.syncBranch.trim() || 'the default branch'}</code>
+							</span>
+							{!settings.syncBranch.trim() && (
+								<>
+									<span className="wp-muted">— if this repository also holds code, give your notes their own branch.</span>
+									<button className="wp-btn wp-btn-sm" disabled={busy} onClick={() => run(async () => void (await onPatch({ syncBranch: 'brain' }), setSaid('Notes go to the brain branch.')))}>
+										Use <code>brain</code>
+									</button>
+								</>
+							)}
+						</div>
 						<details className="wp-small">
 							<summary className="wp-link" style={{ cursor: 'pointer' }}>
 								What the files are called

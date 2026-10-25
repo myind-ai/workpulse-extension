@@ -15,6 +15,7 @@ import { Panel } from '@/ui/Panel'
 import { TrustCentre } from '@/ui/TrustCentre'
 
 import { Backup, Support } from './Backup'
+import { ClaudeCode } from './ClaudeCode'
 import { Health } from './Health'
 import { Blocks, Prefixes, Recall, Shortcuts, Strays, Zones } from './Zones'
 import { TimeField } from '@/ui/TimeField'
@@ -241,6 +242,14 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 			    a field you fill in. The whole of settings comes back, so the form
 			    above cannot overwrite it on its next save. */}
 			<Backup
+				settings={form}
+				onPatch={async (patch) => {
+					setForm(await call('saveSettings', patch))
+					setSaved(false)
+				}}
+			/>
+
+			<ClaudeCode
 				settings={form}
 				onPatch={async (patch) => {
 					setForm(await call('saveSettings', patch))

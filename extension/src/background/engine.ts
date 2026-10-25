@@ -2,7 +2,9 @@
 // that is no longer owed, builds a snapshot, asks `decide()` what to do and
 // does it. Every dependency is injected (Env) so it is tested with fakes.
 
-import { API_ENABLED } from '@/core/features'
+import { fold } from '@/core/bridge'
+import { brainLearnings } from '@/core/bridge-learn'
+import { API_ENABLED, enabled } from '@/core/features'
 import { repeats } from '@/core/learn'
 import { backupDue } from '@/core/sync'
 import { classify, classifyLocal, hoursFromHHMM, isWorkDay, parseZohoDateTime, scanRange } from '@/core/rules'
@@ -474,7 +476,10 @@ export class Engine {
 		if (!s.learnLoop) return
 		const rt = await this.store.runtime()
 		if (rt.loopedAt != null && now - rt.loopedAt < 7 * DAY) return
-		const worst = repeats(await this.store.learnings(), now)[0]
+		// The same count the Learnings page shows: your own notes and what the
+		// Brain holds (Claude Code, other devices), without the copies of your own.
+		const brain = enabled('BRIDGE_SYNC') ? brainLearnings(fold(rt.bridge?.files ?? {})) : []
+		const worst = repeats([...(await this.store.learnings()), ...brain], now)[0]
 		if (!worst) return
 		await this.store.updateRuntime((r) => void (r.loopedAt = now))
 		this.env.ui.notify('loop', `#${worst.tag} has come up ${worst.count} times`, 'Worth a minute before it happens again — your notes are in Learnings.', false)
@@ -496,7 +501,11 @@ export class Engine {
 		if (!s.syncRepo.trim()) return
 		const [rt, day] = await Promise.all([this.store.runtime(), this.store.day(istDate(now))])
 		const due = backupDue({
-			on: s.syncDaily,
+			// The first backup is always the one you press, in Backup step 4, where
+			// the repository and branch are on screen. Running it on its own the
+			// moment a token is saved once wrote a day into a code repository's
+			// default branch before anyone had seen where it would go.
+			on: s.syncDaily && rt.sync?.at != null,
 			now,
 			lastPushAt: rt.sync?.at,
 			lastTryAt: rt.sync?.triedAt,

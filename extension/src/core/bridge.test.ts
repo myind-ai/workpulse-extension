@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { appendLine, changedFiles, entriesPath, filter, fold, newEntry, parseJsonl, reportMarkdown, secretsIn, summarise } from './bridge'
+import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise } from './bridge'
 
 const AT = Date.UTC(2026, 9, 25, 10, 0)
 const e = (o: Record<string, unknown>) => JSON.stringify({ id: 'x', at: AT, kind: 'note', title: 't', ...o })
@@ -83,6 +83,21 @@ describe('bridge', () => {
 		expect(md).toContain('- **PAY-1** — Double submit: guarded ([PR](https://x/pr/1))')
 		expect(md).toContain('- enter key — one path')
 		expect(md).not.toContain('old')
+	})
+
+	it('lists who has written, so a page can show that Claude Code is linked', () => {
+		const got = devicesOf(parseJsonl([e({ id: '1', device: 'cli-mac', at: AT }), e({ id: '2', device: 'cli-mac', at: AT + 5 }), e({ id: '3', device: 'ext-ab12', at: AT + 1 })].join('\n')))
+		expect(got).toEqual([
+			{ device: 'cli-mac', kind: 'cli', count: 2, last: AT + 5 },
+			{ device: 'ext-ab12', kind: 'ext', count: 1, last: AT + 1 },
+		])
+	})
+
+	it('writes the setup commands for a repository and branch', () => {
+		const c = setupCommands('me/notes', 'brain')
+		expect(c.clone).toBe('git clone https://github.com/myind-ai/workpulse-extension.git ~/workpulse-extension')
+		expect(c.setup).toBe('node ~/workpulse-extension/cli/wp-brain.mjs setup --repo me/notes --branch brain')
+		expect(setupCommands('me/notes', '').setup).not.toContain('--branch')
 	})
 
 	it('fetches only entry files whose sha moved', () => {

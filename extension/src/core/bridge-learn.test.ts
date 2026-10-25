@@ -35,6 +35,11 @@ describe('Brain entries in the Learnings list', () => {
 		expect(m.date).toBe('2026-10-25')
 	})
 
+	it('leaves out the copies of this browser’s own Learnings, which the list already holds', () => {
+		const copy = parseJsonl(line({ id: 'journal:l1', kind: 'mistake', title: 'mine' }))
+		expect(brainLearnings(copy)).toEqual([])
+	})
+
 	it('counts towards "keeps coming back" alongside local mistakes', () => {
 		const local = { id: 'l1', date: '2026-10-24', at: AT - 86_400_000, kind: 'mistake' as const, text: 'again #forms', tags: ['forms'] }
 		expect(repeats([local, ...brainLearnings(entries)], AT)).toEqual([expect.objectContaining({ tag: 'forms', count: 2 })])

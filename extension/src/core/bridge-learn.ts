@@ -30,6 +30,8 @@ export function brainLearnings(entries: BridgeEntry[], tickets: { id: string; ke
 	const byKey = new Map(tickets.filter((t) => t.key).map((t) => [t.key as string, t.id]))
 	const out: Learning[] = []
 	for (const e of entries) {
+		// A line this browser copied from its own Learnings is already in the list.
+		if (e.id.startsWith('journal:')) continue
 		const kind = AS[e.kind]
 		if (!kind) continue
 		const why = e.rootCause ? ` — ${e.rootCause}` : ''

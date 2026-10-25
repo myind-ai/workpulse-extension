@@ -60,6 +60,17 @@ bridge/inbox/acks/<device>/*.json         the CLI saying it picked one up
 - Anything shaped like a credential (GitHub, OpenAI/Anthropic, Stripe, Supabase, AWS, Slack tokens, private keys,
   JWTs) is refused on both sides.
 
+**Linking, step by step:** in the extension, Settings → Backup (token, repository, branch; the first backup is
+always pressed by hand), then Settings → **Claude Code & the Brain**, which shows the state of the link and the
+commands to copy. On each machine where you use Claude Code:
+
+```bash
+node cli/wp-brain.mjs setup     # asks: repository, branch, device, brief hook, record hook, global rule, skill — then installs
+node cli/wp-brain.mjs doctor    # checks every part of the link
+```
+
+Or by hand:
+
 ```bash
 node cli/wp-brain.mjs init you/your-private-notes-repo      # once per machine (Node ≥ 22.18)
 node cli/wp-brain.mjs init you/a-private-repo --branch brain  # or: a branch of a repo you already have

@@ -2038,6 +2038,15 @@ describe('the learning loop', () => {
 		expect(ui.notes.filter((n) => n === 'loop')).toHaveLength(2)
 	})
 
+	it('should count a mistake Claude Code recorded in the Brain alongside my own', async () => {
+		at('2026-10-13T10:00:00')
+		await mistake('Forgot the retry path #webhooks')
+		const line = JSON.stringify({ id: 'b1', at: Date.parse('2026-10-12T10:00:00+05:30'), device: 'cli-mac', kind: 'mistake', title: 'Retry path again #webhooks' })
+		await engine.store.updateRuntime((r) => void (r.bridge = { files: { 'bridge/entries/2026-10/cli-mac.jsonl': line } }))
+		await engine.tick()
+		expect(ui.notes.filter((n) => n === 'loop')).toHaveLength(1)
+	})
+
 	it('should stay quiet when nothing has repeated', async () => {
 		at('2026-10-13T10:00:00')
 		await mistake('One-off, my own fault #typo')
@@ -2301,6 +2310,15 @@ describe('the daily backup', () => {
 	beforeEach(async () => {
 		await cmd.saveSettings({ syncRepo: 'me/notes', syncDaily: true, syncAfter: '19:00' })
 		await cmd.saveSyncToken('tok')
+		// The first backup was pressed by hand on an earlier day; from then on it is daily.
+		await engine.store.updateRuntime((r) => void (r.sync = { ...r.sync, at: Date.parse('2026-10-01T19:00:00+05:30') }))
+	})
+
+	it('should never make the first backup on its own — that one is pressed, with the branch on screen', async () => {
+		await engine.store.updateRuntime((r) => void (r.sync = undefined))
+		at('2026-10-12T19:05:00')
+		await engine.tick()
+		expect(ui.backups).toBe(0)
 	})
 
 	it('should not run during the day', async () => {

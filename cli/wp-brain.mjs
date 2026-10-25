@@ -14,6 +14,8 @@
 // never disagree about what an entry is.
 //
 // Usage (see `wp-brain help`):
+//   wp-brain setup        asks repo, branch, device, hooks, rule, skill — then installs them (start here)
+//   wp-brain doctor       checks every part of the link
 //   wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]
 //   wp-brain add <kind> "title" [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
@@ -41,6 +43,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	process.exit(1)
 })
 const { KINDS, ROOT, appendLine, entriesPath, filter, fold, newEntry, reportMarkdown, secretsIn, summarise } = bridge
+const { doctor, setup } = await import(join(here, 'setup.mjs'))
 
 const CONFIG = process.env.WP_BRAIN_CONFIG || join(homedir(), '.config', 'workpulse', 'brain.json')
 const DAY = 86_400_000
@@ -112,7 +115,11 @@ function readAll(cfg) {
 			for (const f of readdirSync(m).filter((f) => f.endsWith('.jsonl'))) files[`${ROOT}/entries/${month}/${f}`] = readFileSync(join(m, f), 'utf8')
 		}
 	}
-	return [...fold(files), ...fromBackup(cfg)].sort((a, b) => b.at - a.at)
+	// A learning the extension copied to bridge/ is also in its backup, under the
+	// same `journal:<id>`: one line, not two.
+	const live = fold(files)
+	const seen = new Set(live.map((e) => e.id))
+	return [...live, ...fromBackup(cfg).filter((e) => !seen.has(e.id))].sort((a, b) => b.at - a.at)
 }
 
 /**
@@ -407,6 +414,16 @@ const commands = {
 		console.log(`In step with ${cfg.repo}.`)
 	},
 
+	/** Asks, then installs the clone, the hooks, the global rule and the skill (cli/setup.mjs). */
+	setup({ opt }) {
+		return setup({ opt, cliPath: fileURLToPath(import.meta.url), skillDir: join(here, '..', 'skills', 'workpulse-brain'), init: commands.init })
+	},
+
+	/** Every part of the link, checked. */
+	doctor() {
+		doctor({ CONFIG, cliPath: fileURLToPath(import.meta.url), readAll })
+	},
+
 	help() {
 		console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(0, 30).map((l) => l.slice(3)).join('\n'))
 	},
@@ -495,7 +512,7 @@ const [cmd = 'help', ...rest] = process.argv.slice(2)
 const run = commands[cmd]
 if (!run) die(`Unknown command "${cmd}". Try: wp-brain help`)
 try {
-	run(parseArgs(rest))
+	await run(parseArgs(rest))
 } catch (e) {
 	die(e.message)
 }
