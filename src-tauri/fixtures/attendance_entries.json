@@ -1,0 +1,14 @@
+{
+  "firstIn": "12-10-2026 09:12:05",
+  "firstIn_Location": "",
+  "lastOut": "-",
+  "lastOut_Location": "",
+  "totalHrs": "03:10",
+  "paidBreak": "00:00",
+  "unPaidBreak": "00:00",
+  "allowedToCheckIn": false,
+  "status": "Present",
+  "entries": [
+    { "checkIn": "12-10-2026 09:12:05", "sourceOfPunchIn": "Web", "checkOut": "", "sourceOfPunchOut": "" }
+  ]
+}

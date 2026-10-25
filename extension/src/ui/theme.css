@@ -1,0 +1,560 @@
+/* WorkPulse theme: one accent (indigo) on neutral greys, system font, follows
+   light/dark. Tokens live on .wp-root so they work inside the overlay's
+   Shadow DOM as well as on extension pages. */
+
+/* On `:host` as well as `.wp-root`: inside a content script's shadow root there
+   is no ancestor to inherit from, so a component that forgets the class renders
+   with every colour resolving to nothing — which looks like a transparent box
+   floating over somebody's page, not like a missing class. */
+:host,
+.wp-root {
+	--wp-accent: #4f46e5;
+	--wp-accent-hover: #4338ca;
+	--wp-accent-soft: #eef2ff;
+	--wp-accent-text: #ffffff;
+	--wp-bg: #f8fafc;
+	--wp-surface: #ffffff;
+	--wp-surface-2: #f1f5f9;
+	--wp-border: #e2e8f0;
+	--wp-text: #0f172a;
+	--wp-muted: #64748b;
+	--wp-faint: #94a3b8;
+	--wp-danger: #dc2626;
+	--wp-warn: #b45309;
+	--wp-ok: #15803d;
+	--wp-ok-soft: #dcfce7;
+	--wp-radius: 12px;
+	--wp-shadow: 0 24px 64px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.08);
+	font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+	font-size: 14px;
+	line-height: 1.45;
+	color: var(--wp-text);
+	-webkit-font-smoothing: antialiased;
+	box-sizing: border-box;
+}
+
+@media (prefers-color-scheme: dark) {
+	:host,
+	.wp-root {
+		--wp-accent: #6366f1;
+		--wp-accent-hover: #818cf8;
+		--wp-accent-soft: rgba(99, 102, 241, 0.16);
+		--wp-bg: #0b0f19;
+		--wp-surface: #111827;
+		--wp-surface-2: #1f2937;
+		--wp-border: #273244;
+		--wp-text: #e5e7eb;
+		--wp-muted: #9ca3af;
+		--wp-faint: #6b7280;
+		--wp-danger: #f87171;
+		--wp-warn: #fbbf24;
+		--wp-ok: #4ade80;
+		--wp-ok-soft: rgba(74, 222, 128, 0.16);
+		--wp-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+	}
+}
+
+.wp-root *,
+.wp-root *::before,
+.wp-root *::after {
+	box-sizing: border-box;
+}
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+.wp-stack { display: flex; flex-direction: column; gap: 12px; }
+.wp-stack-sm { display: flex; flex-direction: column; gap: 6px; }
+.wp-row { display: flex; align-items: center; gap: 8px; }
+.wp-row-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wp-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wp-grow { flex: 1 1 auto; min-width: 0; }
+/* `auto-fit` rather than a fixed count: at 760px a three-column form of number
+   fields squashes, and a column that cannot hold its label is worse than two. */
+.wp-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.wp-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 16px; }
+
+/* ── text ───────────────────────────────────────────────────────────────
+   One scale, four sizes. An eyebrow is a label for the block under it, not a
+   heading: lower contrast than the thing it names, never bigger. */
+.wp-eyebrow { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wp-faint); }
+.wp-title { font-size: 19px; font-weight: 640; letter-spacing: -0.012em; line-height: 1.25; margin: 0; }
+.wp-h1 { font-size: 19px; font-weight: 640; letter-spacing: -0.012em; line-height: 1.25; margin: 0; }
+.wp-h2 { font-size: 14px; font-weight: 620; letter-spacing: -0.005em; margin: 0; }
+.wp-big { font-size: 28px; font-weight: 640; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.wp-muted { color: var(--wp-muted); }
+/* A third step below muted, for the line that explains the line above it. */
+.wp-faint { color: var(--wp-faint); }
+.wp-small { font-size: 12px; line-height: 1.5; }
+.wp-num { font-variant-numeric: tabular-nums; }
+.wp-error { color: var(--wp-danger); font-size: 13px; }
+.wp-ok-text { color: var(--wp-ok); }
+.wp-warn-text { color: var(--wp-warn); }
+
+/* ── links versus actions ───────────────────────────────────────────────────
+   A link goes somewhere. An action does something. They had the same style,
+   which meant half the app turned blue and underlined itself on hover for
+   things that were not links at all — "delete this", "pick duplicates",
+   "snooze". Underlined blue means one thing to everyone who has ever used a
+   browser, and it is a promise this app was breaking sixty times over.
+
+   Rule, applied mechanically: <a> is .wp-link, <button> is .wp-action. */
+
+/* A link is the text colour with a quiet underline that arrives on hover. The
+   browser default — blue, always underlined — makes a page of ordinary actions
+   look like a 1996 index. Only things that navigate get the accent. */
+.wp-link {
+	color: inherit; background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+	text-decoration: none; text-underline-offset: 3px; text-decoration-thickness: 1px;
+	border-radius: 3px;
+}
+.wp-link:hover { color: var(--wp-accent); text-decoration: underline; }
+.wp-link:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--wp-accent-soft); }
+.wp-link.wp-muted:hover { color: var(--wp-text); }
+/* Anything that is genuinely a hyperlink out of the page. */
+.wp-md a, .wp-link-out { color: var(--wp-accent); }
+
+/* A text button. Never underlined, never the link colour — on hover it becomes
+   what it has been all along: a small button, with a border and a radius. */
+.wp-action {
+	display: inline-flex; align-items: center; gap: 6px;
+	padding: 3px 8px; border: 1px solid transparent; border-radius: 8px;
+	background: none; color: inherit; font: inherit; cursor: pointer;
+	text-decoration: none; text-align: left;
+	transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, color 0.12s;
+}
+.wp-action:hover:not(:disabled) { background: var(--wp-surface-2); border-color: var(--wp-border); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+/* A button whose content is a sentence, not a row of controls.
+   `.wp-action` is inline-flex, so a chip, a name and a meta line inside one
+   become three shrinking columns — which is how a ticket title ended up
+   wrapping a word per line. Text flows; only controls are flex. */
+.wp-action-text { display: block; }
+.wp-action-text > * { display: inline; }
+
+.wp-action:focus-visible { outline: none; border-color: var(--wp-accent); box-shadow: 0 0 0 3px var(--wp-accent-soft); }
+.wp-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.wp-action.wp-muted:hover:not(:disabled) { color: var(--wp-text); }
+/* Deleting reads differently, and only on the way in. */
+.wp-action-danger:hover:not(:disabled) { color: var(--wp-danger); border-color: var(--wp-danger); background: transparent; }
+
+/* ── surfaces ───────────────────────────────────────────────────────── */
+.wp-card { background: var(--wp-surface); border: 1px solid var(--wp-border); border-radius: var(--wp-radius); padding: 18px 20px; }
+.wp-card > .wp-eyebrow:first-child { margin-bottom: 10px; }
+.wp-card-flat { background: var(--wp-surface-2); border-radius: 10px; padding: 12px 14px; }
+.wp-divider { height: 1px; background: var(--wp-border); border: 0; margin: 4px 0; }
+
+/* ── controls ───────────────────────────────────────────────────────── */
+.wp-btn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	height: 36px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--wp-border);
+	background: var(--wp-surface); color: var(--wp-text); font: inherit; font-weight: 550;
+	cursor: pointer; white-space: nowrap; text-decoration: none; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.wp-btn:hover:not(:disabled) { background: var(--wp-surface-2); border-color: var(--wp-faint); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07); }
+.wp-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--wp-accent-soft), 0 0 0 1px var(--wp-accent); }
+.wp-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.wp-btn-primary { background: var(--wp-accent); border-color: var(--wp-accent); color: var(--wp-accent-text); }
+.wp-btn-primary:hover:not(:disabled) { background: var(--wp-accent-hover); border-color: var(--wp-accent-hover); box-shadow: 0 0 0 4px var(--wp-accent-soft); }
+.wp-btn-ghost { background: transparent; border-color: transparent; color: var(--wp-muted); }
+.wp-btn-ghost:hover:not(:disabled) { background: var(--wp-surface-2); color: var(--wp-text); border-color: var(--wp-border); }
+.wp-btn-soft { background: var(--wp-accent-soft); border-color: transparent; color: var(--wp-accent); }
+.wp-btn-danger { color: var(--wp-danger); }
+.wp-btn-sm { height: 30px; padding: 0 10px; font-size: 13px; border-radius: 8px; }
+.wp-btn-lg { height: 44px; padding: 0 20px; font-size: 15px; border-radius: 10px; }
+.wp-btn-block { width: 100%; }
+
+.wp-label { display: block; font-size: 12px; font-weight: 600; color: var(--wp-muted); margin-bottom: 6px; }
+.wp-input, .wp-select, .wp-textarea {
+	width: 100%; font: inherit; color: var(--wp-text); background: var(--wp-surface);
+	border: 1px solid var(--wp-border); border-radius: 9px; padding: 8px 10px; min-height: 36px;
+	transition: border-color 0.12s, box-shadow 0.12s;
+}
+.wp-textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+/* Inside flex rows, a growing field takes the free space instead of a full line. */
+.wp-row > .wp-grow, .wp-row-wrap > .wp-grow { width: auto; flex: 1 1 220px; }
+.wp-input:focus, .wp-select:focus, .wp-textarea:focus { outline: none; border-color: var(--wp-accent); box-shadow: 0 0 0 3px var(--wp-accent-soft); }
+.wp-select { appearance: none; -webkit-appearance: none; padding-right: 30px;
+	background-image: linear-gradient(45deg, transparent 50%, var(--wp-muted) 50%), linear-gradient(135deg, var(--wp-muted) 50%, transparent 50%);
+	background-position: calc(100% - 16px) 15px, calc(100% - 11px) 15px; background-size: 5px 5px; background-repeat: no-repeat; }
+
+.wp-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 550; background: var(--wp-surface-2); color: var(--wp-muted); white-space: nowrap; }
+.wp-chip-accent { background: var(--wp-accent-soft); color: var(--wp-accent); }
+.wp-chip-ok { color: var(--wp-ok); }
+.wp-chip-warn { color: var(--wp-warn); }
+.wp-chip-danger { color: var(--wp-danger); }
+.wp-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+.wp-seg { display: inline-flex; background: var(--wp-surface-2); border-radius: 10px; padding: 3px; gap: 2px; }
+.wp-seg button { border: 0; background: transparent; font: inherit; font-weight: 550; color: var(--wp-muted); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.wp-seg button[aria-pressed='true'] { background: var(--wp-surface); color: var(--wp-text); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
+
+.wp-day-toggle { width: 36px; height: 32px; border-radius: 8px; border: 1px solid var(--wp-border); background: var(--wp-surface); font: inherit; font-size: 12px; font-weight: 600; color: var(--wp-muted); cursor: pointer; }
+.wp-day-toggle[aria-pressed='true'] { background: var(--wp-accent); border-color: var(--wp-accent); color: #fff; }
+
+.wp-kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5px; border: 1px solid var(--wp-border); border-bottom-width: 2px; border-radius: 5px; color: var(--wp-muted); }
+
+/* ── tables ─────────────────────────────────────────────────────────── */
+.wp-table { width: 100%; border-collapse: collapse; }
+.wp-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--wp-muted); padding: 8px 10px; border-bottom: 1px solid var(--wp-border); }
+.wp-table td { padding: 10px; border-bottom: 1px solid var(--wp-border); vertical-align: top; }
+.wp-table tr:last-child td { border-bottom: 0; }
+
+/* ── forced overlay ─────────────────────────────────────────────────── */
+.wp-backdrop {
+	position: fixed; inset: 0; z-index: 2147483647; display: flex; align-items: center; justify-content: center;
+	padding: 24px; background: rgba(15, 23, 42, 0.56); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+	animation: wp-fade 0.16s ease-out;
+}
+.wp-backdrop-soft { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; align-items: flex-start; justify-content: flex-end; pointer-events: none; }
+.wp-modal { width: 100%; max-width: 560px; max-height: calc(100vh - 48px); overflow: auto; background: var(--wp-surface); border-radius: 16px; box-shadow: var(--wp-shadow); padding: 24px; animation: wp-rise 0.2s ease-out; }
+.wp-window .wp-modal { max-width: none; max-height: none; min-height: 100vh; border-radius: 0; box-shadow: none; }
+.wp-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; }
+.wp-slot { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.wp-banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--wp-accent-soft); color: var(--wp-accent); font-weight: 550; }
+
+@keyframes wp-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wp-rise { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .wp-backdrop, .wp-modal { animation: none; } }
+
+/* Long lists scroll inside their card rather than stretching the page or the
+   reminder window — a day with thirty entries must not push the buttons away. */
+.wp-scroll { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.wp-scroll-sm { max-height: 180px; overflow-y: auto; overscroll-behavior: contain; }
+.wp-window .wp-modal { max-height: 100vh; overflow-y: auto; }
+
+/* A count on an icon button. Lives here, not in the dashboard sheet, because
+   the popup needs it too. */
+.wp-badge {
+	position: absolute;
+	top: -5px;
+	right: -5px;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 999px;
+	background: var(--wp-danger);
+	color: #fff;
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+}
+
+/* ── notes, rendered ─────────────────────────────────────────────────────── */
+.wp-md { font-size: 13px; line-height: 1.55; }
+.wp-md > *:first-child { margin-top: 0; }
+.wp-md > *:last-child { margin-bottom: 0; }
+.wp-md-p { margin: 0 0 8px; white-space: pre-wrap; }
+.wp-md-h { margin: 14px 0 6px; font-size: 13px; font-weight: 650; }
+.wp-md-list { margin: 0 0 8px; padding-left: 20px; }
+.wp-md-list li { margin: 2px 0; }
+.wp-md-done { color: var(--wp-muted); text-decoration: line-through; }
+.wp-md-quote { margin: 0 0 8px; padding: 2px 0 2px 10px; border-left: 2px solid var(--wp-border); color: var(--wp-muted); }
+.wp-md-code { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: var(--wp-surface-2); overflow-x: auto; font-size: 12px; }
+.wp-md-rule { margin: 10px 0; border: 0; border-top: 1px solid var(--wp-border); }
+.wp-md code { padding: 1px 4px; border-radius: 4px; background: var(--wp-surface-2); font-size: 12px; }
+
+/* ── the note editor ─────────────────────────────────────────────────────── */
+.wp-editor { border: 1px solid var(--wp-border); border-radius: 8px; background: var(--wp-surface); }
+.wp-editor-bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--wp-border); flex-wrap: wrap; }
+.wp-editor-btn { min-width: 26px; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--wp-muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.wp-editor-btn:hover:not(:disabled) { background: var(--wp-surface-2); color: var(--wp-text); }
+.wp-editor-btn:disabled { opacity: .4; cursor: default; }
+.wp-editor-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--wp-border); }
+.wp-editor-body { padding: 8px 10px; min-height: 120px; max-height: 420px; overflow-y: auto; }
+.wp-editor-line { display: block; width: 100%; border: 0; padding: 0; margin: 2px 0; background: transparent; color: var(--wp-text); font: inherit; font-size: 13px; line-height: 1.55; resize: none; overflow: hidden; }
+.wp-editor-line:focus { outline: 0; }
+.wp-editor-block { margin: 2px 0; border-radius: 4px; cursor: text; }
+.wp-editor-block:hover { background: var(--wp-surface-2); }
+.wp-editor-blank { min-height: 1.2em; }
+
+/* ── folds (widget sections that grow) ───────────────────────────────────── */
+.wp-fold { border-top: 1px solid var(--wp-border); }
+.wp-fold-head { display: flex; align-items: center; gap: 8px; padding: 7px 0; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--wp-muted); list-style: none; }
+.wp-fold-head::-webkit-details-marker { display: none; }
+.wp-fold-head::before { content: '▸'; font-size: 9px; color: var(--wp-muted); }
+.wp-fold[open] > .wp-fold-head::before { content: '▾'; }
+.wp-fold-head:hover { color: var(--wp-text); }
+.wp-fold-body { padding: 2px 0 8px; }
+
+/* ── a setup wizard ──────────────────────────────────────────────────────── */
+.wp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wp-step { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--wp-border); }
+.wp-step:first-child { border-top: 0; }
+.wp-step-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--wp-surface-2); color: var(--wp-muted); }
+.wp-step-on > .wp-step-mark { background: var(--wp-accent); color: var(--wp-accent-text); }
+.wp-step-done > .wp-step-mark { background: var(--wp-ok-soft); color: var(--wp-ok); }
+.wp-step-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.wp-step-done > div > .wp-step-title { color: var(--wp-muted); font-weight: 500; }
+.wp-chip-ok { background: var(--wp-ok-soft); color: var(--wp-ok); }
+
+/* ── the sidebar's search ────────────────────────────────────────────────── */
+.wp-search { position: relative; margin: 0 0 12px; }
+.wp-search-out { position: absolute; z-index: 20; left: 0; right: -8px; top: calc(100% + 4px); max-height: 60vh; overflow-y: auto; padding: 4px; border: 1px solid var(--wp-border); border-radius: 10px; background: var(--wp-surface); box-shadow: var(--wp-shadow); }
+.wp-search-group { padding: 6px 8px 2px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--wp-muted); }
+.wp-search-hit { display: flex; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wp-text); text-align: left; cursor: pointer; font: inherit; }
+.wp-search-on, .wp-search-hit:hover { background: var(--wp-surface-2); }
+.wp-search-mark { flex: none; color: var(--wp-accent); font-size: 11px; line-height: 1.5; }
+.wp-search-title { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── what we promise before asking for a token ───────────────────────────── */
+.wp-assure { list-style: none; margin: 0; padding: 10px 12px; border: 1px solid var(--wp-border); border-radius: 10px; background: var(--wp-surface-2); display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.5; color: var(--wp-muted); }
+.wp-assure strong { color: var(--wp-text); font-weight: 600; }
+
+/* ── an icon that is a button and nothing else ───────────────────────────── */
+.wp-icon-btn { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wp-muted); cursor: pointer; }
+.wp-icon-btn { border: 1px solid transparent; transition: background 0.12s, border-color 0.12s, color 0.12s; }
+.wp-icon-btn:hover:not(:disabled) { background: var(--wp-surface-2); border-color: var(--wp-border); color: var(--wp-text); }
+.wp-icon-btn:focus-visible { outline: none; border-color: var(--wp-accent); box-shadow: 0 0 0 3px var(--wp-accent-soft); }
+
+/* ── a card that opens ───────────────────────────────────────────────────── */
+.wp-panel { border: 1px solid var(--wp-border); border-radius: var(--wp-radius); background: var(--wp-surface); }
+.wp-panel[open] { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.wp-panel-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; cursor: pointer; list-style: none; }
+.wp-panel-head::-webkit-details-marker { display: none; }
+.wp-panel-head::before { content: '▸'; flex: none; font-size: 10px; color: var(--wp-muted); }
+.wp-panel[open] > .wp-panel-head::before { content: '▾'; }
+.wp-panel-head:hover .wp-panel-title { color: var(--wp-accent); }
+.wp-panel-title { display: block; font-size: 14px; font-weight: 620; letter-spacing: -0.005em; }
+.wp-panel-hint { display: block; margin-top: 2px; font-size: 12px; color: var(--wp-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-panel-body { padding: 2px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ── a button that is working ────────────────────────────────────────────── */
+.wp-spin { display: inline-block; width: 12px; height: 12px; margin-right: 7px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: wp-turn .7s linear infinite; opacity: .8; }
+@keyframes wp-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .wp-spin { animation-duration: 2s; } }
+
+/* ── a countdown ─────────────────────────────────────────────────────────── */
+.wp-progress { height: 4px; border-radius: 999px; background: var(--wp-surface-2); overflow: hidden; }
+.wp-progress > span { display: block; height: 100%; background: var(--wp-accent); transition: width 1s linear; }
+
+/* ── the footer every page carries ───────────────────────────────────────── */
+.wp-foot { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; margin-top: 28px; padding: 14px 0 6px; border-top: 1px solid var(--wp-border); font-size: 12px; color: var(--wp-muted); }
+.wp-foot-links { display: flex; gap: 16px; }
+.wp-foot a { color: var(--wp-muted); }
+.wp-foot a:hover { color: var(--wp-accent); }
+.wp-side-links { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--wp-border); }
+.wp-side-links a { color: var(--wp-muted); }
+.wp-side-links a:hover { color: var(--wp-accent); }
+
+/* ── a strip of figures ──────────────────────────────────────────────────── */
+.wp-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.wp-figures > .wp-stat { padding-right: 18px; }
+.wp-figures > .wp-stat + .wp-stat { padding-left: 18px; border-left: 1px solid var(--wp-border); }
+@media (max-width: 600px) {
+	.wp-figures { grid-template-columns: 1fr; gap: 14px; }
+	.wp-figures > .wp-stat + .wp-stat { padding-left: 0; border-left: 0; border-top: 1px solid var(--wp-border); padding-top: 14px; }
+}
+
+/* ── the one thing that matters on a card ────────────────────────────────── */
+.wp-lede { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 10px; background: var(--wp-accent-soft); }
+.wp-lede > strong { font-size: 15px; font-weight: 620; }
+
+/* ── short lists that are lists, not paragraphs ──────────────────────────── */
+.wp-list { margin: 4px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.wp-list li { margin: 0; }
+.wp-list li::marker { color: var(--wp-faint); }
+.wp-brief-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+
+/* ── a row of controls that stays a row ──────────────────────────────────── */
+.wp-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; padding: 12px 16px; }
+.wp-controls-end { margin-left: auto; white-space: nowrap; }
+.wp-controls .wp-seg button { padding: 5px 10px; font-size: 12px; }
+@media (max-width: 560px) {
+	.wp-controls-end { margin-left: 0; }
+}
+
+/* ── the credit line under a reminder ────────────────────────────────────── */
+.wp-credit { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--wp-border); }
+/* Everywhere the card or the panel *is* the window, the credit line belongs at
+   the foot of the window rather than wherever a short one happens to stop. The
+   reminder window and the toolbar widget are both that shape. */
+.wp-window .wp-modal > .wp-stack { display: flex; flex-direction: column; min-height: calc(100vh - 48px); }
+.wp-window .wp-modal > .wp-stack > :not(.wp-credit):last-of-type { margin-bottom: 0; }
+.wp-window .wp-credit { margin-top: auto; }
+
+/* The widget: a column the height of the popup, with its last line at the end
+   of it. Chrome sizes a popup to its content, so without a floor a short day
+   leaves the credit halfway up a box that then jumps when a panel opens. */
+.wp-pop { display: flex; flex-direction: column; min-height: 440px; }
+.wp-pop > .wp-stack-sm { flex: 1 1 auto; display: flex; flex-direction: column; }
+.wp-pop .wp-pitch { margin-top: auto; padding-top: 10px; }
+.wp-credit > span:first-child { flex: 1 1 auto; }
+
+/* ── a checklist row with room for an explanation ────────────────────────── */
+.wp-area { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--wp-border); }
+.wp-area:first-child { border-top: 0; }
+
+/* The question asked where the button was, rather than in a browser dialog. */
+.wp-confirm {
+	display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+	padding: 4px 6px 4px 10px; border: 1px solid var(--wp-border); border-radius: 9px; background: var(--wp-surface-2);
+}
+
+/* A screenshot in a list: the picture itself, not a triangle in front of it. */
+.wp-shot-thumb {
+	display: block; padding: 0; border: 1px solid var(--wp-border); border-radius: 8px;
+	background: var(--wp-surface-2); cursor: zoom-in; line-height: 0; overflow: hidden; max-width: 320px;
+}
+.wp-shot-thumb:hover { border-color: var(--wp-accent); }
+.wp-shot-thumb img { display: block; width: 100%; height: auto; max-height: 180px; object-fit: cover; object-position: top; }
+
+/* A recording: a button until somebody wants it, then a player. */
+.wp-clip-open {
+	display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px;
+	border: 1px solid var(--wp-border); border-radius: 9px; background: var(--wp-surface);
+	color: var(--wp-text); font: inherit; font-size: 13px; cursor: pointer;
+}
+.wp-clip-open:hover:not(:disabled) { border-color: var(--wp-accent); color: var(--wp-accent); }
+.wp-clip { width: 100%; max-width: 480px; border-radius: 10px; border: 1px solid var(--wp-border); background: #000; }
+
+/* And full size, over everything, when that is what you want. */
+.wp-lightbox {
+	position: fixed; inset: 0; z-index: 2147483646; display: flex; flex-direction: column; gap: 10px;
+	align-items: center; justify-content: center; padding: 24px; cursor: zoom-out;
+	background: rgba(15, 23, 42, 0.78); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+	animation: wp-fade 0.12s ease-out;
+}
+.wp-lightbox img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 10px; box-shadow: var(--wp-shadow); }
+.wp-lightbox .wp-muted { color: #cbd5e1; }
+
+/* ── the box, on any page ────────────────────────────────────────────────── */
+.wp-pal-back {
+	position: fixed; inset: 0; z-index: 2147483646; display: flex; align-items: flex-start; justify-content: center;
+	padding: 12vh 16px 16px; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+	animation: wp-fade 0.12s ease-out;
+}
+.wp-pal {
+	width: 100%; max-width: 620px; background: var(--wp-surface); border: 1px solid var(--wp-border);
+	border-radius: 14px; box-shadow: var(--wp-shadow); overflow: hidden; animation: wp-rise 0.16s ease-out;
+}
+.wp-pal-modes { display: flex; align-items: center; gap: 2px; padding: 8px 10px 0; }
+.wp-pal-mode {
+	padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; background: none;
+	color: var(--wp-muted); font: inherit; font-size: 12px; font-weight: 550; cursor: pointer;
+}
+.wp-pal-mode:hover { background: var(--wp-surface-2); border-color: var(--wp-border); color: var(--wp-text); }
+.wp-pal-on { background: var(--wp-accent-soft); border-color: transparent; color: var(--wp-accent); }
+.wp-pal-tab { margin-left: auto; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wp-faint); }
+.wp-pal-input {
+	width: 100%; padding: 14px 16px 16px; border: 0; background: none; color: var(--wp-text);
+	font: inherit; font-size: 17px; line-height: 1.3;
+}
+.wp-pal-input:focus { outline: none; }
+.wp-pal-input::placeholder { color: var(--wp-faint); }
+.wp-pal-list { max-height: 44vh; overflow-y: auto; border-top: 1px solid var(--wp-border); padding: 5px; }
+.wp-pal-chips {
+	display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+	padding: 0 14px 12px;
+}
+.wp-pal-chips .wp-chip { cursor: pointer; }
+.wp-pal-shot { display: inline-flex; align-items: center; gap: 8px; }
+.wp-pal-thumb { padding: 0; border: 1px solid var(--wp-border); border-radius: 6px; background: none; cursor: pointer; line-height: 0; overflow: hidden; }
+.wp-pal-thumb:hover { border-color: var(--wp-accent); }
+.wp-pal-shot img { height: 34px; width: auto; max-width: 120px; object-fit: cover; display: block; }
+.wp-pal-big { padding: 0 14px 12px; }
+.wp-pal-big img { width: 100%; max-height: 40vh; object-fit: contain; object-position: top; border: 1px solid var(--wp-border); border-radius: 8px; background: var(--wp-surface-2); }
+
+/* What was captured, said once, around the thing that was captured: the
+   visible page — not the whole document, and not this box. */
+.wp-pal-flash {
+	position: fixed; inset: 0; z-index: 1; pointer-events: none;
+	border: 3px solid var(--wp-accent); border-radius: 4px;
+	animation: wp-flash 0.65s ease-out forwards;
+}
+@keyframes wp-flash {
+	0% { opacity: 0; box-shadow: inset 0 0 0 100vmax rgba(79, 70, 229, 0.14); }
+	18% { opacity: 1; }
+	100% { opacity: 0; box-shadow: inset 0 0 0 0 rgba(79, 70, 229, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .wp-pal-flash { animation: none; opacity: 0; } }
+
+.wp-pal-mins { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--wp-muted); }
+.wp-pal-mins input {
+	width: 54px; padding: 2px 6px; border: 1px solid var(--wp-border); border-radius: 999px;
+	background: var(--wp-surface); color: var(--wp-text); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.wp-pal-mins input:focus { outline: none; border-color: var(--wp-accent); box-shadow: 0 0 0 3px var(--wp-accent-soft); }
+
+.wp-pal-slot { margin-left: auto; font-size: 11.5px; color: var(--wp-faint); font-variant-numeric: tabular-nums; }
+
+.wp-pal-group { padding: 8px 14px 2px; border-top: 1px solid var(--wp-border); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--wp-faint); }
+.wp-pal-group + .wp-pal-list { border-top: 0; }
+.wp-pal-hit {
+	display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
+	background: none; color: var(--wp-text); font: inherit; text-align: left; cursor: pointer;
+}
+.wp-pal-at, .wp-pal-hit:hover { background: var(--wp-surface-2); }
+.wp-pal-title { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-pal-detail { font-size: 11.5px; color: var(--wp-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-pal-foot {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	padding: 8px 14px; border-top: 1px solid var(--wp-border); background: var(--wp-surface-2);
+	font-size: 11.5px; color: var(--wp-muted);
+}
+.wp-pal-keys kbd {
+	font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 4px; margin: 0 1px;
+	border: 1px solid var(--wp-border); border-bottom-width: 2px; border-radius: 4px; color: var(--wp-muted);
+}
+
+/* ── the day, as a bar ───────────────────────────────────────────────────── */
+.wp-bar { position: relative; height: 8px; border-radius: 4px; background: var(--wp-border); overflow: hidden; }
+.wp-bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--wp-ok); transition: width 0.25s ease-out; }
+.wp-bar-gap { background: var(--wp-accent); }
+.wp-bar-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--wp-faint); opacity: 0.7; }
+@media (prefers-reduced-motion: reduce) { .wp-bar-fill { transition: none; } }
+
+/* One pip a day: a run you can see rather than a number you are told. */
+.wp-strip { display: flex; gap: 3px; align-items: center; }
+.wp-pip { width: 10px; height: 10px; border-radius: 3px; background: var(--wp-border); }
+.wp-pip-done { background: var(--wp-ok); }
+.wp-pip-gap { background: var(--wp-warn); opacity: 0.55; }
+.wp-pip-off { background: var(--wp-border); }
+.wp-pip-today { outline: 2px solid var(--wp-accent); outline-offset: 1px; }
+
+/* ── the ⋯ menu ──────────────────────────────────────────────────────────── */
+.wp-menu { position: relative; display: inline-flex; }
+.wp-menu-list {
+	position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; min-width: 210px; padding: 5px;
+	display: flex; flex-direction: column; gap: 1px;
+	background: var(--wp-surface); border: 1px solid var(--wp-border); border-radius: 10px; box-shadow: var(--wp-shadow);
+}
+.wp-menu-item {
+	display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: 0; border-radius: 7px;
+	background: none; color: var(--wp-text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.wp-menu-item:hover:not(:disabled) { background: var(--wp-surface-2); }
+.wp-menu-item:disabled { opacity: 0.45; cursor: default; }
+.wp-menu-danger { color: var(--wp-danger); }
+
+/* ── illustrations ───────────────────────────────────────────────────────── */
+.wp-art { display: block; margin: 0 auto; max-width: 100%; object-fit: cover; background: #fff; }
+
+/* ── a line that arrives rather than appears ─────────────────────────────── */
+.wp-fade-in { animation: wp-fade .5s ease-out both; }
+@keyframes wp-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .wp-fade-in { animation: none; } }
+
+/* ── the one line a local Pro feature says ──────────────────────────────────
+   Quiet on purpose: the feature beside it is already running, so this is a
+   question, not a wall. Accent-tinted rather than warning-coloured — nothing
+   has gone wrong. */
+.wp-nag {
+	background: var(--wp-accent-soft);
+	border: 1px solid var(--wp-accent);
+	border-radius: var(--wp-radius);
+	padding: 8px 10px;
+	color: var(--wp-text);
+	line-height: 1.5;
+}
+.wp-nag svg { color: var(--wp-accent); flex: none; }
+
+/* ── the day as one bar ─────────────────────────────────────────────────────
+   To scale, so four missing hours look like four missing hours. A gap is
+   hatched rather than coloured: it is an absence, and an absence should not
+   read as another category of work. */
+.wp-tl { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--wp-surface-2); gap: 1px; }
+.wp-tl-seg { display: block; min-width: 2px; }
+.wp-tl-work { background: var(--wp-accent); }
+.wp-tl-break { background: var(--wp-accent-soft); }
+.wp-tl-away { background: var(--wp-border); }
+.wp-tl-gap {
+	background: repeating-linear-gradient(45deg, var(--wp-surface-2), var(--wp-surface-2) 4px, var(--wp-border) 4px, var(--wp-border) 8px);
+}

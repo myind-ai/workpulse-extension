@@ -1,0 +1,6 @@
+{
+  "2026-10-05": { "Status": "Present", "FirstIn": "05-Oct-2026 09:10 AM", "LastOut": "05-Oct-2026 06:45 PM", "TotalHours": "09:35", "ShiftName": "General" },
+  "2026-10-06": { "Status": "Absent", "FirstIn": "", "LastOut": "", "TotalHours": "00:00", "ShiftName": "General" },
+  "2026-10-07": { "Status": "Present", "FirstIn": "07-Oct-2026 09:30 AM", "LastOut": "", "TotalHours": "00:00", "ShiftName": "General" },
+  "2026-10-08": { "Status": "Sick", "FirstIn": "", "LastOut": "", "TotalHours": "", "ShiftName": "General" }
+}

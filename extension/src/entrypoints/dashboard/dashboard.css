@@ -1,0 +1,76 @@
+/* The dashboard's own layout. One column of content at a readable width, a
+   sidebar that stays out of the way, and a single vertical rhythm so a page of
+   cards reads as a page rather than as a pile. */
+
+.wp-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; background: var(--wp-bg); }
+
+.wp-side {
+	border-right: 1px solid var(--wp-border); padding: 22px 14px 18px; background: var(--wp-surface);
+	display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; height: 100vh;
+}
+.wp-side .wp-brand { padding: 0 8px 14px; font-size: 15px; }
+.wp-nav {
+	display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	padding: 7px 10px; border-radius: 8px; color: var(--wp-muted); font-size: 13px; font-weight: 520; text-decoration: none;
+}
+.wp-nav:hover { background: var(--wp-surface-2); color: var(--wp-text); }
+.wp-nav[aria-current='page'] { background: var(--wp-accent-soft); color: var(--wp-accent); font-weight: 600; }
+.wp-nav .wp-count {
+	min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--wp-danger);
+	color: #fff; font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* 720px is about 90 characters at this size: wider and the eye loses the line. */
+/* The column is the height of the window, so the footer sits at the bottom of
+   the screen rather than wherever the content happened to stop. A short page —
+   two regularisation rows — used to leave the credit floating in the middle
+   with half a screen of white underneath it. */
+.wp-main { padding: 32px 36px 40px; max-width: 760px; width: 100%; min-height: 100vh; display: flex; flex-direction: column; }
+.wp-main > .wp-stack { gap: 16px; }
+/* Whatever the page's root element happens to be, it takes the free height —
+   so the footer lands at the bottom of the screen rather than wherever the
+   content stopped. The footer keeps an auto margin of its own as a belt and
+   braces, for a page whose root is something unexpected. */
+.wp-main > *:not(.wp-foot) { flex: 1 1 auto; }
+.wp-main > .wp-foot { flex: none; margin-top: auto; padding-top: 28px; }
+/* A note that explains the page rather than adding to it: it belongs at the
+   foot of the screen, under the work, not wedged between the work and the
+   credit line. */
+.wp-tail { margin-top: auto; padding-top: 20px; }
+
+/* One head per page: an eyebrow, a title, and the actions for the page. */
+.wp-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+.wp-page-head + * { margin-top: 0; }
+
+.wp-stat { display: flex; flex-direction: column; gap: 1px; }
+.wp-stat .wp-eyebrow { margin-bottom: 2px; }
+
+.wp-timeline { display: flex; flex-direction: column; }
+.wp-tl-item { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--wp-border); align-items: start; font-size: 13px; }
+.wp-tl-item:last-child { border-bottom: 0; }
+
+/* The pages inside the group you are in. Indented and quieter than the four
+   above them: a second level, not a second menu. */
+.wp-subnav { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 10px; padding-left: 8px; border-left: 1px solid var(--wp-border); }
+.wp-subnav-item {
+	display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	padding: 5px 8px; border-radius: 7px; color: var(--wp-muted); font-size: 12.5px; text-decoration: none;
+}
+.wp-subnav-item:hover { background: var(--wp-surface-2); color: var(--wp-text); }
+.wp-subnav-item[aria-current='page'] { color: var(--wp-accent); font-weight: 600; }
+
+.wp-side-foot { margin-top: auto; padding: 0 8px; }
+
+@media (max-width: 860px) {
+	.wp-shell { grid-template-columns: 1fr; }
+	.wp-side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 12px; }
+	.wp-side .wp-brand { padding: 0 10px 0 4px; }
+	.wp-side-foot { margin: 0 0 0 auto; }
+	.wp-side-links { flex-direction: row; gap: 10px; margin: 0; padding: 0; border: 0; }
+	.wp-main { padding: 20px 16px 32px; }
+	.wp-tl-item { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* Brain: entries on the left, tickets and projects on the right; one column when narrow. */
+.wp-brain { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .wp-brain { grid-template-columns: minmax(0, 1fr); } }

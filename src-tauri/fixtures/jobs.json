@@ -1,0 +1,11 @@
+{
+  "response": {
+    "result": [
+      { "jobId": "469505000000267001", "jobName": "Payment service", "projectId": "4695", "projectName": "Checkout", "jobStatus": "in-progress" },
+      { "jobId": "469505000000267002", "jobName": "Code review", "projectName": "", "jobStatus": "in-progress" }
+    ],
+    "message": "Data fetched successfully",
+    "uri": "/api/timetracker/getjobs",
+    "status": 0
+  }
+}

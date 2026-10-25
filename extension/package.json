@@ -1,0 +1,36 @@
+{
+  "name": "workpulse-extension",
+  "description": "WorkPulse \u2014 hourly work log, check-in and regularisation reminders for Zoho People.",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "wxt prepare",
+    "demo": "wxt build && node scripts/demo.mjs",
+    "build:api": "WXT_ENABLE_API=true wxt build",
+    "release": "wxt build && wxt zip",
+    "check": "tsc --noEmit && vitest run",
+    "release:store": "WXT_STORE=true wxt build && WXT_STORE=true wxt zip"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@wxt-dev/module-react": "^1.2.2",
+    "happy-dom": "^20.10.6",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9",
+    "wxt": "^0.20.27"
+  }
+}
