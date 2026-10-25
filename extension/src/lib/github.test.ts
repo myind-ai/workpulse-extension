@@ -292,3 +292,26 @@ describe('two people, one branch', () => {
 		await expect(client(refused, 'main').commit([{ path: 'a.json', content: '{}' }], 'x')).rejects.toThrow(/token/i)
 	})
 })
+
+describe('never a cached answer', () => {
+	// GitHub sends Cache-Control: private, max-age=60. A cached read followed by
+	// a write is how a line appended a moment ago gets overwritten.
+	it('asks the browser not to cache any call, including the conditional tree read', async () => {
+		const seen: RequestInit[] = []
+		const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+			seen.push(init ?? {})
+			if (String(url).includes('/git/trees/')) return new Response(JSON.stringify({ tree: [] }), { status: 200 })
+			return ok({ content: encode64('x'), sha: 's', default_branch: 'main', full_name: 'me/notes', private: true })
+		}) as unknown as typeof fetch
+		const gh = client(fetchFn, 'main')
+		await gh.read('a.txt')
+		await gh.treeIfChanged('"v1"')
+		expect(seen.length).toBe(2)
+		for (const init of seen) expect(init.cache).toBe('no-store')
+	})
+
+	it('treats a 304 as nothing changed', async () => {
+		const fetchFn = vi.fn(async () => new Response(null, { status: 304 })) as unknown as typeof fetch
+		expect(await client(fetchFn, 'main').treeIfChanged('"v1"')).toBeNull()
+	})
+})

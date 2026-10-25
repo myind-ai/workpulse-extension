@@ -1,11 +1,11 @@
-// Eyes, posture and water. Gentle, opt-in, and quiet when being interrupted
+// Eyes, posture, water and breathing. Gentle, opt-in, and quiet when being interrupted
 // would be worse than the thing it is reminding you about — during a focus
 // session, a meeting, or when you are not at the desk at all.
 //
 // The 20-20-20 rule: every 20 minutes of screen work, look at something about
 // 20 feet away for 20 seconds. Longer breaks after about two hours.
 
-export type NudgeKind = 'eyes' | 'move' | 'water' | 'posture'
+export type NudgeKind = 'eyes' | 'move' | 'water' | 'posture' | 'breathe'
 
 export interface HealthSettings {
 	/** Minutes between eye breaks. 0 is off. The rule says 20. */
@@ -17,6 +17,8 @@ export interface HealthSettings {
 	/** Minutes between water nudges while you are at the desk. */
 	waterEvery: number
 	posture: boolean
+	/** Minutes between a minute of slow breathing. 0 is off. */
+	breatheEvery?: number
 }
 
 export interface HealthState {
@@ -37,6 +39,7 @@ export interface HealthState {
 	lastMove?: number
 	lastWater?: number
 	lastPosture?: number
+	lastBreathe?: number
 	/** Glasses logged today. */
 	water: number
 	/** Quiet during a focus session or a meeting: those are the point. */
@@ -76,6 +79,9 @@ export function dueNudges(set: HealthSettings, s: HealthState): NudgeKind[] {
 	if (set.moveEvery > 0 && atDesk >= set.moveEvery * MIN && since(s.lastMove) >= set.moveEvery * MIN) out.unshift('move')
 	if (set.waterTarget > 0 && s.water < set.waterTarget && atDesk >= Math.max(20, set.waterEvery) * MIN && since(s.lastWater) >= Math.max(20, set.waterEvery) * MIN) out.push('water')
 	if (set.posture && atDesk >= 90 * MIN && since(s.lastPosture) >= 90 * MIN) out.push('posture')
+	// A minute of slow breathing: the one break that needs no room to stand in.
+	const breathe = set.breatheEvery ?? 0
+	if (breathe > 0 && atDesk >= breathe * MIN && since(s.lastBreathe) >= breathe * MIN) out.push('breathe')
 	return out
 }
 
@@ -125,9 +131,15 @@ const LINES: Record<NudgeKind, { title: string; body: string }[]> = {
 		{ title: 'Unclench', body: 'Jaw, shoulders, and whichever hand is on the mouse.' },
 		{ title: 'Reset the chair', body: 'Back where the chair can hold you, rather than where the screen pulled you.' },
 	],
+	breathe: [
+		{ title: 'Breathe for a minute', body: 'In for four, hold for seven, out for eight. Three or four rounds.' },
+		{ title: 'Slow down your breathing', body: 'Longer out than in. The minute on the clock is the whole exercise.' },
+		{ title: 'One minute, eyes closed', body: 'Breathe in through the nose, out slowly through the mouth. Let the shoulders drop on each one.' },
+		{ title: 'Box breathing', body: 'Four in, four hold, four out, four hold. Round again until the timer ends.' },
+	],
 }
 
-const SECONDS: Record<NudgeKind, number> = { eyes: 20, move: 120, water: 0, posture: 0 }
+const SECONDS: Record<NudgeKind, number> = { eyes: 20, move: 120, water: 0, posture: 0, breathe: 60 }
 
 /** What the extra nudges on a merged card are called, in a few words. */
 const ALSO: Record<NudgeKind, string> = {
@@ -135,6 +147,7 @@ const ALSO: Record<NudgeKind, string> = {
 	move: 'Stand up for a minute',
 	water: 'Have some water',
 	posture: 'Sit back, shoulders down',
+	breathe: 'A minute of slow breathing',
 }
 
 /**

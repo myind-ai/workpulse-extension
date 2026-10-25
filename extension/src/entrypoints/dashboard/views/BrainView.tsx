@@ -45,6 +45,10 @@ export function BrainView({ arg }: { arg?: string }) {
 	const [show, setShow] = useState(PAGE)
 	const personal = enabled('PERSONAL')
 
+	// A link from a ticket page (#/brain/PAY-2433) lands filtered to that ticket,
+	// also when the Brain is already open.
+	useEffect(() => setTicket(arg), [arg])
+
 	// While this page is open, look every minute; the background looks every fifteen.
 	useEffect(() => {
 		const poll = () => void call('pollBridge').then(reload, () => undefined)
@@ -226,7 +230,7 @@ export function BrainView({ arg }: { arg?: string }) {
 	)
 }
 
-function EntryCard({ e, onTicket, onProject }: { e: BridgeEntry; onTicket: (k: string) => void; onProject: (p: string) => void }) {
+export function EntryCard({ e, onTicket, onProject }: { e: BridgeEntry; onTicket: (k: string) => void; onProject: (p: string) => void }) {
 	const [open, setOpen] = useState(false)
 	const detail = !!(e.body || e.asked || e.done || e.rootCause || e.next?.length || e.links)
 	return (

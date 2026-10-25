@@ -175,3 +175,23 @@ describe('one card for everything owed at once', () => {
 		expect(a?.title).not.toBe(b?.title)
 	})
 })
+
+describe('a minute of breathing', () => {
+	it('is off unless asked for', () => {
+		expect(dueNudges(set(), state())).not.toContain('breathe')
+	})
+
+	it('comes due on its own interval, and not again until the next one', () => {
+		expect(dueNudges(set({ breatheEvery: 60 }), state())).toContain('breathe')
+		expect(dueNudges(set({ breatheEvery: 60 }), state({ lastBreathe: NOW - 10 * 60_000 }))).not.toContain('breathe')
+	})
+
+	it('stays quiet during a focus session like every other break', () => {
+		expect(dueNudges(set({ breatheEvery: 60 }), state({ busyUntil: NOW + 60_000 }))).toEqual([])
+	})
+
+	it('counts down a minute and joins a merged card in a line', () => {
+		expect(nudgeFor('breathe').seconds).toBe(60)
+		expect(mergeNudges(['eyes', 'breathe'])?.also).toEqual([{ kind: 'breathe', text: 'A minute of slow breathing' }])
+	})
+})

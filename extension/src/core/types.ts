@@ -1,6 +1,7 @@
 // Shared data model. Mirrors the desktop app's SQLite tables (src-tauri/src/db.rs)
 // so the phase 3 bridge can sync records by `uid`. Instants are epoch ms.
 
+import type { NudgeKind } from './health'
 import type { Tier } from './licence'
 
 export type ZohoMode = 'reminder' | 'timelogs' | 'full'
@@ -44,6 +45,8 @@ export interface Settings {
 	waterEvery: number
 	/** The occasional "sit back, shoulders down". */
 	posture: boolean
+	/** Minutes between a minute of slow breathing. 0 is off. */
+	breatheEvery: number
 	/** Ticket prefixes your teams use: PAY, LEAP, SALESPRO. Empty accepts any. */
 	ticketPrefixes: string[]
 	/** `owner/repo` to back up to. Empty turns the whole thing off. */
@@ -151,6 +154,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	waterTarget: 0,
 	waterEvery: 45,
 	posture: false,
+	breatheEvery: 0,
 	ticketPrefixes: [],
 	syncRepo: '',
 	syncBranch: '',
@@ -291,9 +295,9 @@ export interface Pending {
 	/** Set when the card is asking whether it happened, rather than nudging. */
 	logMinutes?: number
 	/** For a 'health' card: which nudge, and how long the countdown runs. */
-	nudge?: 'eyes' | 'move' | 'water' | 'posture'
+	nudge?: NudgeKind
 	/** The others that came due at the same moment — one card, not three. */
-	alsoNudges?: { kind: 'eyes' | 'move' | 'water' | 'posture'; text: string }[]
+	alsoNudges?: { kind: NudgeKind; text: string }[]
 	seconds?: number
 	/** A note you asked to be reminded of at the next break. */
 	note?: string
@@ -354,10 +358,11 @@ export interface Runtime {
 		lastMove?: number
 		lastWater?: number
 		lastPosture?: number
+		lastBreathe?: number
 		water?: number
 		waterDate?: string
 		/** How many times each nudge has spoken, so its wording moves on. */
-		said?: Partial<Record<'eyes' | 'move' | 'water' | 'posture', number>>
+		said?: Partial<Record<NudgeKind, number>>
 		/** What you wrote at a break: a reminder for the next one, or a record. */
 		notes?: { id: string; at: number; text: string; kind?: string; showNext?: boolean; shownAt?: number }[]
 	}

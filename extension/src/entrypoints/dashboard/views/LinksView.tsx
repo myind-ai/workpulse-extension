@@ -11,6 +11,7 @@ import { Icon } from '@/ui/Icon'
 import { Menu, type MenuItem } from '@/ui/Menu'
 import { Undo } from '@/ui/Undo'
 
+import { TicketBrain } from './TicketBrain'
 import { TicketLearnings } from './TicketLearnings'
 import { TicketPageNotes } from './Notes'
 import { TicketNotes } from './TicketNotes'
@@ -475,6 +476,8 @@ function TicketPage({ id }: { id: string }) {
 			<section className="wp-card">
 				<TicketLearnings ticketId={space.id} />
 			</section>
+
+			<TicketBrain name={space.name} />
 
 			{/* What you found on this ticket's pages, with the screenshots. */}
 			<TicketPageNotes ticketId={space.id} />

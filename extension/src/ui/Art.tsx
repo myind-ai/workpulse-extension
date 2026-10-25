@@ -5,10 +5,11 @@
 // That way art can land one file at a time without a code change, and a build
 // missing a file never shows a broken image.
 //
-// A slot is a six-second loop (`<name>.mp4`) with its first frame as a still
-// (`<name>.jpg`). The still is what shows first, what shows to anyone who asked
-// for less motion, and what shows when the video cannot play. The clips are made
-// from the masters in assets/tick by scripts/build-art.mjs.
+// A slot is a six-second loop (`<name>.webm`, VP9 with transparency) with its
+// first frame as a still (`<name>.webp`, also transparent). The still is what
+// shows first, what shows to anyone who asked for less motion, and what shows
+// when the video cannot play. Both sit on any card, light or dark. The clips are
+// cut out of the masters in assets/tick by scripts/build-art.mjs.
 
 import { useEffect, useRef, useState } from 'react'
 
@@ -52,17 +53,17 @@ export function Art({
 
 	if (!enabled('TICK') || !ok) return null
 	const url = (ext: string) => chrome.runtime.getURL(`/art/${name}.${ext}`)
-	const style = { borderRadius: round ? 14 : 0, width: Math.round(size * ASPECT), height: size, objectFit: 'cover' as const }
+	const style = { borderRadius: round ? 14 : 0, width: Math.round(size * ASPECT), height: size, objectFit: 'contain' as const }
 
 	if (!play || reducedMotion()) {
-		return <img className="wp-art" src={url('jpg')} alt="" aria-hidden style={style} onError={() => setOk(false)} />
+		return <img className="wp-art" src={url('webp')} alt="" aria-hidden style={style} onError={() => setOk(false)} />
 	}
 	return (
 		<video
 			ref={ref}
 			className="wp-art"
-			src={url('mp4')}
-			poster={url('jpg')}
+			src={url('webm')}
+			poster={url('webp')}
 			autoPlay
 			muted
 			loop

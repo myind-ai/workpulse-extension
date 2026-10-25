@@ -16,13 +16,13 @@ export function Health({ settings, onPatch }: { settings: Settings; onPatch: Pat
 	const { data: notes, reload: reloadNotes } = useLive(() => call('healthNotes'))
 	const { busy, run } = useAction()
 
-	const on = [settings.eyeEvery && 'eyes', settings.moveEvery && 'standing', settings.waterTarget && 'water', settings.posture && 'posture'].filter(Boolean)
+	const on = [settings.eyeEvery && 'eyes', settings.moveEvery && 'standing', settings.waterTarget && 'water', settings.posture && 'posture', settings.breatheEvery && 'breathing'].filter(Boolean)
 
 	return (
 		<Panel
-			title="Breaks, water and posture"
+			title="Breaks, water, posture and breathing"
 			hint={on.length ? `On: ${on.join(', ')}` : 'All off'}
-			keywords="health break eye 20-20-20 water drink walk stand posture rest screen strain hydration notes"
+			keywords="health break eye 20-20-20 water drink walk stand posture breathe breathing calm rest screen strain hydration notes"
 			right={water && water.target ? <span className="wp-chip">{water.had} / {water.target}</span> : undefined}
 		>
 			<Art name="breathe" size={88} />
@@ -81,6 +81,17 @@ export function Health({ settings, onPatch }: { settings: Settings; onPatch: Pat
 				<span style={{ width: 140 }}>Posture</span>
 				<input type="checkbox" checked={settings.posture} disabled={busy} onChange={(e) => run(() => onPatch({ posture: e.target.checked }))} />
 				<span className="wp-muted wp-small">"shoulders down, jaw unclenched", about every 90 minutes</span>
+			</label>
+
+			<label className="wp-row">
+				<span style={{ width: 140 }}>Breathe</span>
+				<select className="wp-select wp-sm" style={{ width: 150 }} value={settings.breatheEvery} disabled={busy} onChange={(e) => run(() => onPatch({ breatheEvery: Number(e.target.value) }))}>
+					<option value={0}>never</option>
+					<option value={60}>every hour</option>
+					<option value={90}>every 90 min</option>
+					<option value={120}>every 2 hours</option>
+				</select>
+				<span className="wp-muted wp-small">a minute of slow breathing, counted down, with Tick</span>
 			</label>
 
 			<label className="wp-row">

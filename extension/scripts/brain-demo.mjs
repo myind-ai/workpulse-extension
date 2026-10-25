@@ -1,22 +1,29 @@
-// Shows Tick and the Brain working end to end, with nothing leaving the machine.
+// Shows Tick and the Brain working end to end.
 //
-// GitHub is played by a stand-in answered inside the browser (ctx.route), seeded
-// with a bridge/ folder from a local clone. The built extension then really
-// syncs it (conditional tree read, blob fetch), really writes an entry from the
-// Brain page (git data API commit), and that written file is handed back so the
-// CLI can read it. Screenshots go to the out folder.
+// By default nothing leaves the machine: GitHub is played by a stand-in answered
+// inside the browser (ctx.route), seeded with a bridge/ folder from a local
+// clone. The built extension then really syncs it (conditional tree read, blob
+// fetch), really writes an entry from the Brain page (git data API commit), and
+// that written file is handed back to the clone so the CLI can read it.
 //
 //   npm run build && node scripts/brain-demo.mjs <clone-with-bridge> [outDir]
+//
+// Against real GitHub instead (nothing stubbed; the token only ever lives in a
+// throwaway browser profile that is deleted at the end):
+//
+//   WP_GH_REPO=owner/repo WP_GH_BRANCH=branch WP_GH_TOKEN=$(gh auth token) \
+//     node scripts/brain-demo.mjs - [outDir]
 
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, dirname } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { chromium } from 'playwright'
 
 const EXT = resolve('.output/chrome-mv3')
 const CLONE = resolve(process.argv[2] ?? '.')
 const OUT = resolve(process.argv[3] ?? '../docs/screenshots/brain')
+const REAL = process.env.WP_GH_REPO && process.env.WP_GH_TOKEN ? { repo: process.env.WP_GH_REPO, branch: process.env.WP_GH_BRANCH ?? '', token: process.env.WP_GH_TOKEN } : null
 mkdirSync(OUT, { recursive: true })
 
 // ── the stand-in repository ────────────────────────────────────────────────
@@ -28,7 +35,7 @@ const walk = (dir, rel) => {
 		else files[r] = readFileSync(join(dir, f.name), 'utf8')
 	}
 }
-if (existsSync(join(CLONE, 'bridge'))) walk(join(CLONE, 'bridge'), 'bridge')
+if (!REAL && existsSync(join(CLONE, 'bridge'))) walk(join(CLONE, 'bridge'), 'bridge')
 const sha = (s) => {
 	let h = 0
 	for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0
@@ -69,24 +76,28 @@ async function github(route) {
 }
 
 // ── the browser ────────────────────────────────────────────────────────────
-const ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'workpulse-brain-')), {
+const profile = mkdtempSync(join(tmpdir(), 'workpulse-brain-'))
+const ctx = await chromium.launchPersistentContext(profile, {
 	headless: true,
 	channel: 'chromium',
 	viewport: { width: 1280, height: 900 },
 	serviceWorkers: 'allow',
 	args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
 })
-await ctx.route('https://api.github.com/**', github)
+if (!REAL) await ctx.route('https://api.github.com/**', github)
 let [sw] = ctx.serviceWorkers()
 if (!sw) sw = await ctx.waitForEvent('serviceworker')
 const extId = new URL(sw.url()).host
 const ext = (p) => `chrome-extension://${extId}/${p}`
 
-// A backup target and a stand-in token: the extension only needs them to exist.
-await sw.evaluate(async () => {
-	const { settings = {} } = await chrome.storage.local.get('settings')
-	await chrome.storage.local.set({ settings: { ...settings, syncRepo: 'you/workpulse-notes' }, syncToken: 'stand-in-token' })
-})
+// A backup target and a token: the extension only needs them to exist.
+await sw.evaluate(
+	async (t) => {
+		const { settings = {} } = await chrome.storage.local.get('settings')
+		await chrome.storage.local.set({ settings: { ...settings, syncRepo: t.repo, syncBranch: t.branch }, syncToken: t.token })
+	},
+	REAL ?? { repo: 'you/workpulse-notes', branch: '', token: 'stand-in-token' },
+)
 
 const page = await ctx.newPage()
 const shot = async (name) => {
@@ -94,51 +105,89 @@ const shot = async (name) => {
 	await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: false })
 	console.log(`shot ${name}.png`)
 }
+const bridgeState = () => sw.evaluate(async () => (await chrome.storage.local.get('runtime')).runtime?.bridge ?? {})
 
-// Empty states first, before anything is logged: Tick on each.
-for (const [view, name] of [
-	['today', '01-today-empty'],
-	['tasks', '02-tasks-empty'],
-	['journal', '03-learnings-empty'],
-	['links', '04-tickets-empty'],
-]) {
-	await page.goto(ext(`dashboard.html#/${view}`))
-	await shot(name)
+try {
+	if (!REAL) {
+		// Empty states first, before anything is logged: Tick on each.
+		for (const [view, name] of [
+			['today', '01-today-empty'],
+			['tasks', '02-tasks-empty'],
+			['journal', '03-learnings-empty'],
+			['links', '04-tickets-empty'],
+		]) {
+			await page.goto(ext(`dashboard.html#/${view}`))
+			await shot(name)
+		}
+		// Dark mode: the clips are cut out, so they sit on a dark card too.
+		await page.emulateMedia({ colorScheme: 'dark' })
+		await page.goto(ext('dashboard.html#/today'))
+		await shot('01b-today-empty-dark')
+		await page.emulateMedia({ colorScheme: 'light' })
+	}
+
+	// The Brain: the page polls on open; then Sync now, explicitly.
+	await page.goto(ext('dashboard.html#/brain'))
+	await page.waitForTimeout(2500)
+	await page.getByRole('button', { name: 'Sync now' }).click()
+	await page.waitForTimeout(2500)
+	await shot(REAL ? 'real-05-brain-synced' : '05-brain-synced')
+	if (REAL) {
+		const first = await bridgeState()
+		console.log(`first sync: ${Object.keys(first.files ?? {}).length} entry file(s), etag ${first.etag ? 'set' : 'none'}, error ${first.error ?? 'none'}`)
+		// A second poll with the ETag must be a 304: the cache stays, nothing is refetched.
+		const second = await page.evaluate(() => chrome.runtime.sendMessage({ wp: 'call', method: 'pollBridge', args: [] }))
+		console.log(`second poll (ETag): ${JSON.stringify(second)}`)
+	}
+
+	if (!REAL) {
+		const more = page.getByRole('button', { name: 'more' }).first()
+		if (await more.count()) await more.click()
+		await shot('06-brain-ticket-detail')
+	}
+
+	// Write one entry from the extension.
+	await page.getByRole('button', { name: '+ Add' }).click()
+	await page.getByPlaceholder(/One line/).fill(REAL ? 'Real GitHub round trip from the extension #bridge' : 'Tick clips need one backdrop, or they look like stickers #design')
+	await page.getByPlaceholder('Project or repo').fill('workpulse')
+	if (!REAL) await shot('07-brain-add')
+	await page.getByRole('button', { name: 'Save', exact: true }).click()
+	// The form closes when the commit is done; a real one can queue behind the
+	// daily backup, which runs the first time a repository is set after 19:00.
+	await page.getByPlaceholder(/One line/).waitFor({ state: 'detached', timeout: 60_000 })
+	await page.waitForTimeout(800)
+	await shot(REAL ? 'real-08-brain-after-add' : '08-brain-after-add')
+
+	if (!REAL) {
+		await page.getByRole('button', { name: 'Personal', exact: true }).click()
+		await shot('09-brain-personal')
+	}
+
+	const errors = await page.locator('.wp-banner').allTextContents()
+	if (errors.length) console.log(`banners: ${errors.join(' | ')}`)
+
+	if (REAL) {
+		const after = await bridgeState()
+		console.log(`after write: ${Object.keys(after.files ?? {}).join(', ')}`)
+		// Two more writes inside GitHub's max-age=60: with a cached read the
+		// second would overwrite the first. All three lines must be in the file.
+		const add = (title) => page.evaluate((t) => chrome.runtime.sendMessage({ wp: 'call', method: 'bridgeAdd', args: [{ kind: 'note', scope: 'work', title: t }] }), title)
+		console.log(`quick write 1: ${(await add('Quick write one #bridge')).ok}`)
+		console.log(`quick write 2: ${(await add('Quick write two #bridge')).ok}`)
+		const state = await page.evaluate(() => chrome.runtime.sendMessage({ wp: 'call', method: 'bridge', args: [] }))
+		console.log(`this browser's lines: ${state.result.entries.filter((e) => e.device.startsWith('ext-')).length}`)
+	} else {
+		// Hand what the extension wrote back to the clone, as GitHub would.
+		const written = Object.keys(files).filter((p) => /^bridge\/entries\/.+\/ext-[a-z0-9]+\.jsonl$/.test(p))
+		for (const p of written) {
+			mkdirSync(dirname(join(CLONE, p)), { recursive: true })
+			writeFileSync(join(CLONE, p), files[p])
+		}
+		console.log(`extension wrote: ${written.join(', ') || 'nothing'}`)
+		console.log(`requests: ${log.length} (${log.filter((l) => l.includes('/git/trees/')).length} tree reads)`)
+	}
+} finally {
+	await ctx.close()
+	// The profile held the token: it does not outlive the run.
+	rmSync(profile, { recursive: true, force: true })
 }
-
-// The Brain: the page polls on open; then Sync now, explicitly.
-await page.goto(ext('dashboard.html#/brain'))
-await page.waitForTimeout(1500)
-await page.getByRole('button', { name: 'Sync now' }).click()
-await page.waitForTimeout(1500)
-await shot('05-brain-synced')
-
-// Open the ticket entry's detail.
-const more = page.getByRole('button', { name: 'more' }).first()
-if (await more.count()) await more.click()
-await shot('06-brain-ticket-detail')
-
-// Write one entry from the extension.
-await page.getByRole('button', { name: '+ Add' }).click()
-await page.getByPlaceholder(/One line/).fill('Tick clips need one backdrop, or they look like stickers #design')
-await page.getByPlaceholder('Project or repo').fill('workpulse')
-await shot('07-brain-add')
-await page.getByRole('button', { name: 'Save', exact: true }).click()
-await page.waitForTimeout(1500)
-await shot('08-brain-after-add')
-
-// Personal only.
-await page.getByRole('button', { name: 'Personal', exact: true }).click()
-await shot('09-brain-personal')
-
-// Hand what the extension wrote back to the clone, as GitHub would.
-const written = Object.keys(files).filter((p) => /^bridge\/entries\/.+\/ext-[a-z0-9]+\.jsonl$/.test(p))
-for (const p of written) {
-	mkdirSync(dirname(join(CLONE, p)), { recursive: true })
-	writeFileSync(join(CLONE, p), files[p])
-}
-console.log(`extension wrote: ${written.join(', ') || 'nothing'}`)
-console.log(`requests: ${log.length} (${log.filter((l) => l.includes('/git/trees/')).length} tree reads)`)
-const errors = await page.locator('.wp-banner').allTextContents()
-if (errors.length) console.log(`banners: ${errors.join(' | ')}`)
-await ctx.close()

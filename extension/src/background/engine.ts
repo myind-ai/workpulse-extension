@@ -651,7 +651,7 @@ export class Engine {
 
 	async healthNudge(now: number): Promise<void> {
 		const s = await this.store.settings()
-		if (!s.eyeEvery && !s.moveEvery && !s.waterTarget && !s.posture) return
+		if (!s.eyeEvery && !s.moveEvery && !s.waterTarget && !s.posture && !s.breatheEvery) return
 		const [rt, day, entries] = await Promise.all([this.store.runtime(), this.store.day(istDate(now)), this.store.entries(istDate(now))])
 		// Breaks wait their turn behind anything else on the screen, and behind
 		// each other: four in an hour is a colleague, eight is a nuisance.
@@ -660,7 +660,7 @@ export class Engine {
 		const h = rt.health ?? {}
 		const lastBreak = entries.filter((e) => e.kind === 'break').at(-1)?.slotEnd
 		const owed = dueNudges(
-			{ eyeEvery: s.eyeEvery, moveEvery: s.moveEvery, waterTarget: s.waterTarget, waterEvery: s.waterEvery, posture: s.posture },
+			{ eyeEvery: s.eyeEvery, moveEvery: s.moveEvery, waterTarget: s.waterTarget, waterEvery: s.waterEvery, posture: s.posture, breatheEvery: s.breatheEvery },
 			{
 				now,
 				atDeskSince: Math.max(lastBreak ?? 0, day.checkedInAt ?? now),
@@ -669,6 +669,7 @@ export class Engine {
 				lastMove: h.lastMove,
 				lastWater: h.lastWater,
 				lastPosture: h.lastPosture,
+				lastBreathe: h.lastBreathe,
 				water: h.waterDate === today ? (h.water ?? 0) : 0,
 				busyUntil: rt.focus?.endsAt,
 				checkedIn: day.checkedInAt != null,
@@ -691,7 +692,7 @@ export class Engine {
 			let stamps = {}
 			for (const k of card.kinds) {
 				said[k] = (said[k] ?? 0) + 1
-				stamps = { ...stamps, ...{ eyes: { lastEyes: now }, move: { lastMove: now }, water: { lastWater: now }, posture: { lastPosture: now } }[k] }
+				stamps = { ...stamps, ...{ eyes: { lastEyes: now }, move: { lastMove: now }, water: { lastWater: now }, posture: { lastPosture: now }, breathe: { lastBreathe: now } }[k] }
 			}
 			r.health = { ...r.health, ...stamps, said }
 		})

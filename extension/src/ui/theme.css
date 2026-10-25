@@ -525,7 +525,7 @@
 .wp-menu-danger { color: var(--wp-danger); }
 
 /* ── illustrations ───────────────────────────────────────────────────────── */
-.wp-art { display: block; margin: 0 auto; max-width: 100%; object-fit: cover; background: #fff; }
+.wp-art { display: block; margin: 0 auto; max-width: 100%; object-fit: contain; }
 
 /* ── a line that arrives rather than appears ─────────────────────────────── */
 .wp-fade-in { animation: wp-fade .5s ease-out both; }

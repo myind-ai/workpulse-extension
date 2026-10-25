@@ -77,9 +77,21 @@ ln -s "$PWD/skills/workpulse-brain" ~/.claude/skills/workpulse-brain
 
 ## Tick
 
-The clips are made from `assets/tick/NN-slot.mp4` by `node extension/scripts/build-art.mjs` (needs `ffmpeg`).
-Each slot ships as a 320 px, 6-second H.264 loop plus a still (547 KB for all 20). A missing file shows nothing
-rather than a broken image, and reduced motion gets the still. The slot brief is in [`DESIGN.md`](DESIGN.md).
+Tick, the cat, appears on every reminder card, every empty page, and while a backup, push or page read is
+running.
+
+![Tick on a dark card](docs/screenshots/brain/01b-today-empty-dark.png)
+
+The clips are cut out of `assets/tick/NN-slot.mp4` by `node extension/scripts/build-art.mjs`. That needs `ffmpeg`
+with libvpx-vp9, and `python3` with `numpy` and `opencv-python`. Each slot ships as a 320 px, 6-second VP9 loop
+with real transparency (`.webm`) plus a transparent still (`.webp`): 1.4 MB for all 20. Only the backdrop
+connected to the frame edge is removed, so Tick's white belly and eyes stay solid on a dark card.
+
+A missing file shows nothing rather than a broken image, and reduced motion gets the still. The slot brief is in
+[`DESIGN.md`](DESIGN.md).
+
+Breaks include eyes (20-20-20), standing up, water, posture and a minute of slow breathing. Each is off by
+default and set in **Settings → Breaks**.
 
 ## Contributing
 

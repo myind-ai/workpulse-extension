@@ -62,6 +62,11 @@ export class GitHub {
 	private async call(path: string, init: RequestInit = {}): Promise<unknown> {
 		const res = await this.fetchFn(`${API}${path}`, {
 			...init,
+			// GitHub answers with `Cache-Control: private, max-age=60`, so the browser
+			// would hand back the same file for a minute after it changed. Read a
+			// file, append a line, write it back within that minute, and the line
+			// written in between is silently lost. Every answer here must be fresh.
+			cache: 'no-store',
 			headers: {
 				Accept: 'application/vnd.github+json',
 				Authorization: `Bearer ${this.token}`,
@@ -155,6 +160,8 @@ export class GitHub {
 	async treeIfChanged(etag?: string): Promise<{ etag?: string; files: { path: string; sha: string }[] } | null> {
 		const branch = this.repo.branch?.trim() || (await this.check()).defaultBranch
 		const res = await this.fetchFn(`${API}/repos/${this.where}/git/trees/${encodeURIComponent(branch)}?recursive=1`, {
+			// The ETag is handled here, not by the browser's cache (see `call`).
+			cache: 'no-store',
 			headers: {
 				Accept: 'application/vnd.github+json',
 				Authorization: `Bearer ${this.token}`,
