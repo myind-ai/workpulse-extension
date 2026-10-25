@@ -245,38 +245,47 @@ const commands = {
 	brief({ pos, opt }) {
 		const cfg = config()
 		pull(cfg)
-		const all = readAll(cfg)
-		const key = pos[0]?.toUpperCase()
-		const out = []
-		if (key) {
-			const mine = all.filter((e) => e.ticket === key || e.links?.related?.includes(key))
-			const related = new Set(mine.flatMap((e) => e.links?.related ?? []))
-			out.push(`## ${key}: ${mine.length ? mine.length + ' earlier entries' : 'nothing recorded yet'}`)
-			for (const e of mine.slice(0, 12)) {
-				out.push(`- ${short(e)}`)
-				if (e.rootCause) out.push(`    root cause: ${e.rootCause}`)
-				if (e.next?.length) out.push(`    next: ${e.next.join(' · ')}`)
-			}
-			if (related.size) out.push(`Related: ${[...related].join(', ')}`)
-		}
-		if (opt.project) {
-			const p = all.filter((e) => e.project === opt.project).slice(0, 10)
-			out.push('', `## ${opt.project}: last ${p.length}`, ...p.map((e) => `- ${short(e)}`))
-		}
-		const recent = all.filter((e) => e.at > Date.now() - 30 * DAY)
-		const { repeats } = summarise(recent)
-		if (repeats.length) {
-			out.push('', '## Mistakes that keep coming back (30 days)')
-			for (const r of repeats.slice(0, 6)) {
-				const last = recent.find((e) => e.kind === 'mistake' && e.tags?.includes(r.tag))
-				out.push(`- #${r.tag} ×${r.count}${last ? ` — last: ${last.title}${last.rootCause ? ' (' + last.rootCause + ')' : ''}` : ''}`)
-			}
-		}
-		const open = all.filter((e) => e.next?.length && e.status !== 'done' && e.at > Date.now() - 14 * DAY).slice(0, 6)
-		if (open.length) out.push('', '## Open follow-ups (14 days)', ...open.map((e) => `- ${e.ticket ?? e.project ?? ''} ${e.next.join(' · ')}`))
-		const inbox = pending(cfg)
-		if (inbox.length) out.push('', '## Inbox from the extension', ...inbox.map((m) => `- [${m.id}] ${m.ticket ? m.ticket + ': ' : ''}${m.text}`))
+		const out = briefLines(cfg, readAll(cfg), pos[0]?.toUpperCase(), typeof opt.project === 'string' ? opt.project : undefined)
 		console.log(out.length ? out.join('\n') : 'Nothing recorded yet.')
+	},
+
+	/**
+	 * For a Claude Code SessionStart hook: reads the hook's JSON on stdin, finds
+	 * the ticket key in the git branch (`fix/pay-2433-…` → PAY-2433) and the
+	 * project in the remote (`owner/repo`), and prints the brief as context for
+	 * the session. Silent — no output, exit 0 — when the brain is not set up, the
+	 * folder is not a git repository, or there is nothing recorded to say.
+	 */
+	hook() {
+		if (!existsSync(CONFIG)) return
+		let cwd = process.cwd()
+		try {
+			const input = JSON.parse(readFileSync(0, 'utf8') || '{}')
+			if (typeof input.cwd === 'string') cwd = input.cwd
+		} catch {
+			/* no stdin: use the current folder */
+		}
+		const here = (...a) => {
+			try {
+				return execFileSync('git', ['-C', cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+			} catch {
+				return ''
+			}
+		}
+		const branch = here('branch', '--show-current')
+		if (!branch) return
+		const key = branch.match(/\b([a-z]{2,10})-(\d{1,6})\b/i)?.slice(1, 3).join('-').toUpperCase()
+		const remote = here('remote', 'get-url', 'origin').match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1]
+		const cfg = config()
+		pull(cfg)
+		const all = readAll(cfg)
+		// Entries name a project either as owner/repo or by the repo alone.
+		const project = [remote, remote?.split('/')[1]].find((p) => p && all.some((e) => e.project === p)) ?? remote
+		const known = all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || (project && e.project === project))
+		if (!known.length && !pending(cfg).length) return
+		const lines = briefLines(cfg, all, key, project)
+		const text = [`WorkPulse Brain — what was recorded before for ${[key, project].filter(Boolean).join(' / ')} (read it before planning; record mistakes and the session with the workpulse-brain skill):`, '', ...lines].join('\n')
+		process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text.slice(0, 8000) } }))
 	},
 
 	list({ opt }) {
@@ -326,6 +335,40 @@ const commands = {
 	help() {
 		console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(0, 30).map((l) => l.slice(3)).join('\n'))
 	},
+}
+
+/** The brief: earlier entries for a ticket and project, repeat mistakes, open follow-ups, the inbox. */
+function briefLines(cfg, all, key, project) {
+	const out = []
+	if (key) {
+		const mine = all.filter((e) => e.ticket === key || e.links?.related?.includes(key))
+		const related = new Set(mine.flatMap((e) => e.links?.related ?? []))
+		out.push(`## ${key}: ${mine.length ? mine.length + ' earlier entries' : 'nothing recorded yet'}`)
+		for (const e of mine.slice(0, 12)) {
+			out.push(`- ${short(e)}`)
+			if (e.rootCause) out.push(`    root cause: ${e.rootCause}`)
+			if (e.next?.length) out.push(`    next: ${e.next.join(' · ')}`)
+		}
+		if (related.size) out.push(`Related: ${[...related].join(', ')}`)
+	}
+	if (project) {
+		const p = all.filter((e) => e.project === project).slice(0, 10)
+		out.push('', `## ${project}: last ${p.length}`, ...p.map((e) => `- ${short(e)}`))
+	}
+	const recent = all.filter((e) => e.at > Date.now() - 30 * DAY)
+	const { repeats } = summarise(recent)
+	if (repeats.length) {
+		out.push('', '## Mistakes that keep coming back (30 days)')
+		for (const r of repeats.slice(0, 6)) {
+			const last = recent.find((e) => e.kind === 'mistake' && e.tags?.includes(r.tag))
+			out.push(`- #${r.tag} ×${r.count}${last ? ` — last: ${last.title}${last.rootCause ? ' (' + last.rootCause + ')' : ''}` : ''}`)
+		}
+	}
+	const open = all.filter((e) => e.next?.length && e.status !== 'done' && e.at > Date.now() - 14 * DAY).slice(0, 6)
+	if (open.length) out.push('', '## Open follow-ups (14 days)', ...open.map((e) => `- ${e.ticket ?? e.project ?? ''} ${e.next.join(' · ')}`))
+	const inbox = pending(cfg)
+	if (inbox.length) out.push('', '## Inbox from the extension', ...inbox.map((m) => `- [${m.id}] ${m.ticket ? m.ticket + ': ' : ''}${m.text}`))
+	return out
 }
 
 /** Inbox messages nobody on this machine has acknowledged. */

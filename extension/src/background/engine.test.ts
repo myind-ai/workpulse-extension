@@ -2164,6 +2164,47 @@ describe('a page whose ticket is only in its body', () => {
 	})
 })
 
+describe('a ticket from what Claude Code recorded', () => {
+	const entry = (o: Record<string, unknown>) => JSON.stringify({ id: 'e1', at: Date.parse('2026-10-25T10:00:00Z'), device: 'cli-a', kind: 'ticket', title: 'Double submit', ...o })
+	const seed = (...lines: string[]) =>
+		engine.store.updateRuntime((r) => void (r.bridge = { files: { 'bridge/entries/2026-10/cli-a.jsonl': lines.join('\n') } }))
+
+	it('should start the ticket with the entry’s pull request as its first link, and its ask as the note', async () => {
+		await seed(entry({ ticket: 'PAY-77', asked: 'Stop the double submit', links: { pr: 'https://github.com/acme/web/pull/9' } }))
+		expect(await cmd.brainTickets(['PAY-77'])).toEqual({ 'PAY-77': null })
+		const { id } = await cmd.ticketFromBrain('e1')
+		const w = (await engine.store.workspaces()).find((x) => x.id === id)!
+		expect(w.name).toBe('PAY-77 Double submit')
+		expect(w.note).toBe('Stop the double submit')
+		expect(w.tabs.map((t) => t.url)).toEqual(['https://github.com/acme/web/pull/9'])
+		expect(await cmd.brainTickets(['PAY-77'])).toEqual({ 'PAY-77': id })
+	})
+
+	it('should name it from the ticket record and gather its links, whichever entry was clicked', async () => {
+		await seed(
+			entry({ id: 'e1', kind: 'mistake', ticket: 'PAY-79', title: 'Enter key path' }),
+			entry({ id: 'e2', ticket: 'PAY-79', title: 'Refund flow', asked: 'Stop double refunds', links: { pr: 'https://github.com/acme/web/pull/11', urls: ['https://stage.acme.com/r'] } }),
+		)
+		const { id } = await cmd.ticketFromBrain('e1')
+		const w = (await engine.store.workspaces()).find((x) => x.id === id)!
+		expect(w.name).toBe('PAY-79 Refund flow')
+		expect(w.note).toBe('Stop double refunds')
+		expect(w.tabs.map((t) => t.url)).toEqual(['https://github.com/acme/web/pull/11', 'https://stage.acme.com/r'])
+	})
+
+	it('should open the one already saved rather than make a second', async () => {
+		const have = await cmd.saveWorkspace({ name: 'PAY-78 checkout', tabs: [{ title: 'x', url: 'https://x.com/1' }] })
+		await seed(entry({ ticket: 'PAY-78', links: { pr: 'https://github.com/acme/web/pull/10' } }))
+		expect(await cmd.ticketFromBrain('e1')).toEqual({ id: have.id })
+		expect((await engine.store.workspaces()).filter((w) => w.name.startsWith('PAY-78'))).toHaveLength(1)
+	})
+
+	it('should refuse an entry with no ticket key', async () => {
+		await seed(entry({ kind: 'learning' }))
+		await expect(cmd.ticketFromBrain('e1')).rejects.toThrow(/no ticket key/)
+	})
+})
+
 describe('a hundred of everything', () => {
 	it('should not quietly drop a ticket past the old cap of fifty', async () => {
 		at('2026-10-13T09:00:00')

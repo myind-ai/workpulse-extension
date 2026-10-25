@@ -69,6 +69,12 @@ node cli/wp-brain.mjs add --json - < session.json           # a whole ticket at 
 node cli/wp-brain.mjs report --days 7                       # week report, Markdown
 ```
 
+In the extension, Brain entries also show on the **Learnings** page (and count towards "keeps coming back"),
+and on each ticket's page; an entry whose ticket is not saved yet has **+ new ticket**.
+
+For the brief to appear by itself when a Claude Code session starts on a ticket branch (`fix/pay-2433-…`), add a
+SessionStart hook: `node /path/to/cli/wp-brain.mjs hook` (silent when nothing is recorded).
+
 To use the Claude Code skill, link it into your skills folder and set the path to `cli/wp-brain.mjs` in
 `SKILL.md`:
 

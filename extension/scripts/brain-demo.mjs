@@ -173,6 +173,23 @@ const main = async () => {
 	if (!REAL) {
 		await page.getByRole('button', { name: 'Personal', exact: true }).click()
 		await shot('09-brain-personal')
+
+		// Learnings: Claude Code's lines alongside your own, counted together.
+		await page.goto(ext('dashboard.html#/journal'))
+		await page.waitForTimeout(1500)
+		await shot('10-learnings-with-claude-code')
+
+		// A Brain entry whose ticket is not saved yet: start it, land on its page.
+		await page.goto(ext('dashboard.html#/brain'))
+		await page.waitForTimeout(1500)
+		const start = page.getByRole('button', { name: '+ new ticket' }).first()
+		if (await start.count()) {
+			await start.click()
+			await page.waitForURL(/#\/links\//, { timeout: 10_000 })
+			await page.waitForTimeout(1500)
+			await shot('11-ticket-started-from-brain')
+			console.log(`new ticket opened at ${new URL(page.url()).hash}`)
+		} else console.log('no "+ new ticket" button found')
 	}
 
 	const errors = await page.locator('.wp-banner').allTextContents()

@@ -34,6 +34,10 @@ function download(name: string, text: string) {
 
 export function BrainView({ arg }: { arg?: string }) {
 	const { data, reload } = useLive(() => call('bridge'))
+	// Which ticket keys already have a ticket on the Tickets page, so an entry can
+	// open it — or start it.
+	const keys = useMemo(() => [...new Set((data?.entries ?? []).map((e) => e.ticket).filter((k): k is string => !!k))], [data])
+	const { data: saved, reload: reloadSaved } = useLive(() => (keys.length ? call('brainTickets', keys) : Promise.resolve({} as Record<string, string | null>)), [keys.join(',')])
 	const sync = useAction()
 	const [kind, setKind] = useState<EntryKind | 'all'>('all')
 	const [scope, setScope] = useState<Scope | 'all'>('all')
@@ -184,7 +188,9 @@ export function BrainView({ arg }: { arg?: string }) {
 							) : !shown.length ? (
 								<div className="wp-card wp-muted">Nothing matches that.</div>
 							) : (
-								shown.map((e) => <EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} />)
+								shown.map((e) => (
+									<EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} ticketId={e.ticket && saved && e.ticket in saved ? saved[e.ticket] : undefined} onCreated={reloadSaved} />
+								))
 							)}
 							{shown.length < found.length && (
 								<button className="wp-btn wp-btn-sm" onClick={() => setShow(show + PAGE)}>
@@ -230,9 +236,29 @@ export function BrainView({ arg }: { arg?: string }) {
 	)
 }
 
-export function EntryCard({ e, onTicket, onProject }: { e: BridgeEntry; onTicket: (k: string) => void; onProject: (p: string) => void }) {
+export function EntryCard({
+	e,
+	onTicket,
+	onProject,
+	ticketId,
+	onCreated,
+}: {
+	e: BridgeEntry
+	onTicket: (k: string) => void
+	onProject: (p: string) => void
+	/** The saved ticket for this entry's key: an id, null when there is none yet, undefined when not asked. */
+	ticketId?: string | null
+	onCreated?: () => void
+}) {
 	const [open, setOpen] = useState(false)
+	const make = useAction()
 	const detail = !!(e.body || e.asked || e.done || e.rootCause || e.next?.length || e.links)
+	const newTicket = () =>
+		make.run(async () => {
+			const { id } = await call('ticketFromBrain', e.id)
+			onCreated?.()
+			location.hash = `#/links/${id}`
+		})
 	return (
 		<article className="wp-card wp-stack-sm">
 			<div className="wp-between wp-small">
@@ -242,6 +268,16 @@ export function EntryCard({ e, onTicket, onProject }: { e: BridgeEntry; onTicket
 					{e.ticket && (
 						<button className="wp-action" onClick={() => onTicket(e.ticket!)}>
 							{e.ticket}
+						</button>
+					)}
+					{e.ticket && typeof ticketId === 'string' && (
+						<a className="wp-link" href={`#/links/${ticketId}`} title="This ticket on the Tickets page">
+							open ticket →
+						</a>
+					)}
+					{e.ticket && ticketId === null && (
+						<button className="wp-action" disabled={make.busy} onClick={newTicket} title={`Start ${e.ticket} on the Tickets page, with this entry's links`}>
+							+ new ticket
 						</button>
 					)}
 					{e.project && (

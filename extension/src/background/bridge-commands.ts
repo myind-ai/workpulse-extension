@@ -112,6 +112,39 @@ export class BridgeCommands extends PageCommands {
 		return entry
 	}
 
+	/**
+	 * A ticket on the Tickets page for a key the Brain knows and the page does
+	 * not: named after the key and the entry, with the entry's pull request and
+	 * links as its first tabs — or the Brain filtered to that key when it has
+	 * none, since a ticket needs one link to open as a group.
+	 */
+	async ticketFromBrain(entryId: string): Promise<{ id: string }> {
+		const all = (await this.bridge()).entries
+		const e = all.find((x) => x.id === entryId)
+		if (!e?.ticket) throw new Error('That entry has no ticket key.')
+		const key = e.ticket
+		const [have] = await this.ticketsForKeys([key])
+		if (have?.ticketId) return { id: have.ticketId }
+		// The ticket is named by its ticket record when there is one, whichever
+		// entry was clicked — a mistake makes a poor ticket title — and it gathers
+		// every pull request and link recorded under the key.
+		const same = all.filter((x) => x.ticket === key)
+		const record = same.find((x) => x.kind === 'ticket') ?? e
+		const prs = new Set(same.map((x) => x.links?.pr).filter((u): u is string => !!u))
+		const links = [...new Set([...prs, ...same.flatMap((x) => x.links?.urls ?? [])])].filter((u) => /^https?:\/\//.test(u))
+		const tabs = links.length
+			? links.map((url) => ({ title: prs.has(url) ? `${key} · pull request` : url, url }))
+			: [{ title: `${key} in the Brain`, url: chrome.runtime.getURL(`/dashboard.html#/brain/${key}`) }]
+		const space = await this.saveWorkspace({ name: `${key} ${record.title}`.slice(0, 120), tabs, note: record.asked })
+		return { id: space.id }
+	}
+
+	/** Which of these ticket keys already has a ticket on the Tickets page. */
+	async brainTickets(keys: string[]): Promise<Record<string, string | null>> {
+		const found = await this.ticketsForKeys([...new Set(keys)])
+		return Object.fromEntries(found.map((t) => [t.key, t.ticketId ?? null]))
+	}
+
 	/** Ask whatever reads the inbox — the CLI skill — to do something. */
 	async bridgeAsk(text: string, ticket?: string, project?: string): Promise<void> {
 		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')

@@ -17,6 +17,9 @@ First time on a machine (once): `node $WP init owner/repo [--branch brain]`, usi
 set in the extension's Settings → Backup (set the Branch there **before** picking the repository). If
 `~/.config/workpulse/brain.json` exists, it is already done.
 
+If the session already began with a "WorkPulse Brain — what was recorded before…" block (the SessionStart hook,
+`node $WP hook`), that is the brief: read it and skip step 2 below.
+
 ## Before starting a ticket or a side-project task
 
 1. Find the key: from the branch (`git branch --show-current` → `fix/pay-2433-…` → `PAY-2433`), the user's message, or the project name for personal work.

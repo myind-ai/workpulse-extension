@@ -4,9 +4,11 @@
 
 import { useMemo, useState } from 'react'
 
+import { brainLearnings, fromBrain } from '@/core/bridge-learn'
 import { fileName, learningsCsv, learningsMarkdown } from '@/core/export'
-import { KIND_LABEL, matchLearning, type LearnKind, type Learning, type TagCount } from '@/core/learn'
-import type { TicketRow } from '@/core/links'
+import { enabled } from '@/core/features'
+import { KIND_LABEL, matchLearning, repeats, type LearnKind, type Learning, type TagCount } from '@/core/learn'
+import { ticketKey, type TicketRow } from '@/core/links'
 import { addDays, istDate, prettyDate } from '@/core/time'
 import { call } from '@/lib/rpc'
 import { useAction, useLive } from '@/ui/hooks'
@@ -31,10 +33,21 @@ function download(name: string, text: string, type: string) {
 }
 
 export function JournalView() {
-	const { data: items, reload } = useLive(() => call('learnings'))
-	const { data: again } = useLive(() => call('learnRepeats'))
+	const { data: local, reload } = useLive(() => call('learnings'))
+	const { data: localAgain } = useLive(() => call('learnRepeats'))
 	const { data: known } = useLive(() => call('learnTags'))
 	const { data: tickets } = useLive(() => call('ticketList'))
+	// What Claude Code recorded in the Brain, in the same list: one place for
+	// every mistake, so "keeps coming back" counts all of them.
+	const brainOn = enabled('BRAIN') && enabled('BRIDGE_SYNC')
+	const { data: brain } = useLive(() => (brainOn ? call('bridge') : Promise.resolve(null)))
+	const [withBrain, setWithBrain] = useState(true)
+	const fromCli = useMemo(
+		() => (brain?.ready ? brainLearnings(brain.entries, (tickets ?? []).map((t) => ({ id: t.id, key: ticketKey(t.name) }))) : []),
+		[brain, tickets],
+	)
+	const items = useMemo(() => (local ? [...local, ...(withBrain ? fromCli : [])].sort((a, b) => b.at - a.at) : local), [local, fromCli, withBrain])
+	const again = useMemo(() => (withBrain && fromCli.length && items ? repeats(items, Date.now()) : localAgain), [withBrain, fromCli, items, localAgain])
 	const [openTag, setOpenTag] = useState<string | null>(null)
 	const [query, setQuery] = useState('')
 	const [kind, setKind] = useState<LearnKind | 'all'>('all')
@@ -106,6 +119,11 @@ export function JournalView() {
 						</button>
 					))}
 				</span>
+				{!!fromCli.length && (
+					<button className={withBrain ? 'wp-btn wp-btn-sm wp-btn-soft' : 'wp-btn wp-btn-sm'} aria-pressed={withBrain} onClick={() => setWithBrain(!withBrain)} title="Learnings and mistakes from the Brain — Claude Code and your other devices">
+						Brain {fromCli.length}
+					</button>
+				)}
 				<input className="wp-input wp-grow" style={{ minWidth: 180 }} placeholder="Search a word or a #tag…" value={query} onChange={(e) => setQuery(e.target.value)} />
 			</div>
 
@@ -147,7 +165,9 @@ export function JournalView() {
 						{shown
 							.filter((l) => l.date === date)
 							.map((l) =>
-								editing === l.id ? (
+								fromBrain(l) ? (
+									<BrainNote key={l.id} note={l} tickets={tickets ?? []} onTag={setQuery} />
+								) : editing === l.id ? (
 									<Editor key={l.id} today={today} known={known ?? []} note={l} onDone={() => setEditing(null)} onSaved={reload} />
 								) : (
 									<Note key={l.id} note={l} tickets={tickets ?? []} onEdit={() => setEditing(l.id)} onSaved={reload} onTag={setQuery} />
@@ -162,6 +182,42 @@ export function JournalView() {
 					Show {Math.min(PAGE, found.length - shown.length)} more of {found.length - shown.length}
 				</button>
 			)}
+		</div>
+	)
+}
+
+/**
+ * A line Claude Code recorded. Read-only here: it lives in the Brain, written by
+ * another device, and editing it in place would mean writing into a file this
+ * browser does not own. The Brain page is where to add to it.
+ */
+function BrainNote({ note, tickets, onTag }: { note: Learning; tickets: TicketRow[]; onTag: (t: string) => void }) {
+	const ticket = tickets.find((w) => w.id === note.ticketId)
+	return (
+		<div className="wp-card wp-stack-sm">
+			<div className="wp-between">
+				<span className="wp-row wp-small">
+					<span className="wp-dot" style={{ background: KIND_COLOUR[note.kind] }} />
+					<strong>{KIND_LABEL[note.kind]}</strong>
+					<span className="wp-chip wp-chip-accent">Brain</span>
+					{note.tags.map((t) => (
+						<button key={t} className="wp-chip" onClick={() => onTag(t)}>
+							#{t}
+						</button>
+					))}
+				</span>
+				<span className="wp-row wp-small">
+					{ticket && (
+						<a className="wp-chip" href={`#/links/${ticket.id}`} title="Open this ticket">
+							{ticket.name}
+						</a>
+					)}
+					<a className="wp-link" href="#/brain">
+						In the Brain →
+					</a>
+				</span>
+			</div>
+			<Markdown text={note.text} />
 		</div>
 	)
 }
