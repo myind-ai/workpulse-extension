@@ -278,10 +278,19 @@ export const SOURCE_REPO = 'https://github.com/myind-ai/workpulse-extension'
  * branch. `setup` asks for everything else (device name, hooks, the global
  * rule) and installs it; `doctor` says what is and is not linked.
  */
-export function setupCommands(repo: string, branch: string, dir = '~/workpulse-extension'): { connect: string; clone: string; setup: string; doctor: string } {
+export function setupCommands(
+	repo: string,
+	branch: string,
+	dir = '~/workpulse-extension',
+): { plugin: string; pluginOld: string; ask: string; connect: string; clone: string; setup: string; doctor: string } {
 	const cli = `node ${dir}/cli/wp-brain.mjs`
 	const flags = `--repo ${repo}${branch ? ` --branch ${branch}` : ''}`
 	return {
+		// Easiest: the Claude Code plugin brings the skill and both hooks; then one
+		// sentence to Claude links it (it runs `wp-brain init --create --steps`).
+		plugin: `/plugin install workpulse-brain --marketplace ${SOURCE_REPO.replace('https://github.com/', '')}`,
+		pluginOld: `/plugin marketplace add ${SOURCE_REPO.replace('https://github.com/', '')}  then  /plugin install workpulse-brain@workpulse`,
+		ask: `Link my WorkPulse Brain to ${repo}${branch ? ` (branch ${branch})` : ''}`,
 		// One line for macOS / Linux: checks Node, git and the gh login, installs or
 		// updates the CLI, then runs setup. clone + setup are the same by hand.
 		connect: `curl -fsSL ${INSTALL_URL} | bash -s -- ${flags}`,

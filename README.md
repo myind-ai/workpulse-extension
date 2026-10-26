@@ -16,26 +16,33 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
 | `extension/` | The extension (WXT + React 19 + TypeScript, MV3). `npm run check` runs the typecheck and 1,200+ tests |
 | `cli/wp-brain.mjs` | A dependency-free Node CLI that reads and writes the same repository as the extension |
 | `skills/workpulse-brain/` | A Claude Code skill that uses the CLI: a brief before each ticket, a record after |
+| `.claude-plugin/`, `hooks/` | The Claude Code plugin: the skill plus the brief and record hooks, installed with `/plugin install` |
 | `src-tauri/fixtures/` | Sample Zoho People API responses (fake values) the extension tests parse |
 | `assets/tick/` | The masters of Tick, the cat, 20 six-second clips. `extension/scripts/build-art.mjs` makes the shipped versions |
 
 ## Get started in 5 minutes
 
-1. **Install the extension**: download `workpulse-extension-1.1.1-chrome.zip` from
+1. **Install the extension**: download `workpulse-extension-1.1.2-chrome.zip` from
    [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. Then open
    `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped folder.
-2. **Connect Claude Code** (macOS / Linux; needs Node 22.18+, git and `gh auth login`):
+2. **Connect Claude Code**: in Claude Code, run
+
+   ```text
+   /plugin install workpulse-brain --marketplace myind-ai/workpulse-extension
+   ```
+
+   then say *"Link my WorkPulse Brain"*. Claude creates a private `<you>/workpulse-notes` repository if you don't
+   have one, links it, and shows you step 3. It needs Node 22.18+ and `gh auth login`, and you don't edit any
+   settings by hand. Without the plugin, one terminal line does the same (macOS / Linux):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash
    ```
 
-   It installs the CLI and the skill, creates a private `<you>/workpulse-notes` repository if you don't have one,
-   asks before adding the hooks and the rule, and prints the browser steps.
 3. **Connect the extension**: Settings → Backup. The token button opens GitHub's token page already filled in
    (Contents: Read and write, 90 days). Pick only your Brain repository, paste the token, and press **Back up now**.
 
-Full guide, Windows steps and fixes: [docs/guides/connect-extension-and-claude-code.md](docs/guides/connect-extension-and-claude-code.md).
+Full guide, older Claude Code, Windows, and fixes: [docs/guides/connect-extension-and-claude-code.md](docs/guides/connect-extension-and-claude-code.md).
 
 ## Install from source
 

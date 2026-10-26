@@ -127,17 +127,20 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 			{linked && (
 				<div className="wp-stack-sm">
 					<span className="wp-eyebrow">Link Claude Code on a machine</span>
-					<Command
-						label="Paste this in a terminal (macOS / Linux). It checks Node 22.18+, git and your gh login, installs the tool and the skill, then asks before setting up the brief, the record and the rule. Run it again any time to update."
-						text={cmd.connect}
-					/>
+					<Command label="1. In Claude Code, install the plugin (it brings the skill and both hooks; nothing to edit by hand)" text={cmd.plugin} />
+					<Command label="2. Then tell Claude — it creates the repository if needed, links it, and shows the token steps" text={cmd.ask} />
 					<details className="wp-small">
 						<summary className="wp-link" style={{ cursor: 'pointer' }}>
-							Windows, or rather not pipe a script into bash
+							Older Claude Code, a terminal line instead, or Windows
 						</summary>
 						<div className="wp-stack-sm" style={{ marginTop: 6 }}>
-							<Command label="1. Get the tool and the skill (once per machine; Node 22.18 or newer, and gh auth login)" text={cmd.clone} />
-							<Command label="2. Set it up" text={cmd.setup} />
+							<Command label="Claude Code before 2.1.275: two commands" text={cmd.pluginOld} />
+							<Command
+								label="Or without the plugin, one terminal line (macOS / Linux): checks Node 22.18+, git and gh, installs the tool and the skill, asks before adding the hooks and the rule"
+								text={cmd.connect}
+							/>
+							<Command label="Windows: 1. get the tool and the skill (Node 22.18+, gh auth login)" text={cmd.clone} />
+							<Command label="Windows: 2. set it up" text={cmd.setup} />
 						</div>
 					</details>
 					<Command label="Then check every part of the link" text={cmd.doctor} />

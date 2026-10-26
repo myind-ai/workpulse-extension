@@ -9,46 +9,51 @@ One private GitHub repository holds a `bridge/` folder that both the WorkPulse e
 Each device writes only its own file, so nothing conflicts. The tool is `wp-brain` (`cli/wp-brain.mjs` in the WorkPulse repo, Node ≥ 22.18).
 
 ```bash
-WP=~/path/to/workpulse-extension/cli/wp-brain.mjs   # set to your checkout
-node $WP help
+WP="${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs"                        # installed as a Claude Code plugin
+[ -f "$WP" ] || WP="${WP_CLI:-$HOME/workpulse-extension/cli/wp-brain.mjs}"   # installed by install.sh (or set WP_CLI)
+node "$WP" help
 ```
 
-How the whole flow works: `docs/guides/brain-flow-and-next-steps.md` in the WorkPulse repo.
+How to connect everything: `docs/guides/connect-extension-and-claude-code.md` in this repo.
 
 ## Setup — check first, then ask, never assume
 
 Run `node $WP doctor` the first time this skill is used in a session (it is fast and changes nothing).
-If it reports **Config missing**, or the user asks to set up / re-link / change the Brain, **ask before
-installing anything**, with AskUserQuestion (all in one call):
+If it reports **Config missing**, or the SessionStart context says the plugin "is installed but not linked",
+or the user asks to set up / re-link / change the Brain, **ask before doing anything**, with AskUserQuestion
+(one call):
 
 | Question | Options (first is recommended) |
 |---|---|
-| Where should the Brain live? | **A `brain` branch of an existing private repo** (name it) · A separate private repo (name it) · Cancel |
-| What should run automatically? (multi-select) | **Brief at session start** (SessionStart hook) · **Ask to record after a commit** (Stop hook) |
-| Install the global rule and the skill? (multi-select) | **Add the WorkPulse Brain rule to ~/.claude/CLAUDE.md** · **Link this skill into ~/.claude/skills** |
+| Where should the Brain live? | **A new private repo `<gh login>/workpulse-notes`** (the extension's default) · A `brain` branch of an existing private repo (name it) · Another repo (name it) · Not now |
 | This machine's name in the Brain | **cli-<hostname>** (default) · Other |
 
-The repository and branch must match the extension's **Settings → Backup** (Repository, and Branch under
-"Where in the repository"); the extension's **Settings → Claude Code & the Brain** panel shows them and the exact
-command. Then hand the user **one** command to run themselves. It edits `~/.claude/settings.json` and `CLAUDE.md`,
-which Claude Code may not do on its own:
+Get `<gh login>` with `gh api user --jq .login`. If `gh` is missing or not signed in, say so and stop: the
+user runs `! gh auth login` (an interactive login), then ask again.
+
+**Installed as a plugin** (`$CLAUDE_PLUGIN_ROOT` is set in the path above): the hooks already come from the
+plugin, so nothing in `~/.claude` needs editing. Link it yourself — this only writes `~/.config/workpulse/`
+and `~/.workpulse/`, and creates the repository private when it doesn't exist:
 
 ```bash
-! node $WP setup --repo owner/repo --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
+node "$WP" init owner/workpulse-notes --create --steps                    # a new or separate repo
+node "$WP" init owner/existing-repo --branch brain --create --steps       # a branch of an existing repo
 ```
 
-**A machine without the CLI yet** (a new user, a new laptop) gets the whole thing in one line instead. It
-checks Node 22.18+, git and `gh auth`, installs or updates `~/workpulse-extension`, and runs the same setup.
-A repository that doesn't exist yet is created **private** with `gh` after a yes (`--create yes` skips the
-question). At the end it prints the browser steps with a **pre-filled token link** (name, Contents: Read and
-write, 90 days; only the repository has to be picked):
+Then show the user the browser steps it printed (branch, the **pre-filled token link**, Back up now) and run
+`node "$WP" doctor`. The two "Extension" lines turn ✓ only after the user's first **Back up now**.
+
+**Not a plugin** (the skill was linked by hand): `setup` installs the hooks and the rule, which edits
+`~/.claude/settings.json` and `CLAUDE.md` — Claude Code may not do that on its own, so hand the user **one**
+command. On a machine without the CLI, the one-line installer does it all:
 
 ```bash
-! curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo owner/workpulse-notes --branch brain
+! node "$WP" setup --repo owner/repo --branch brain --create yes --brief yes --record yes --rule yes --skill yes
+! curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo owner/workpulse-notes
 ```
 
-With no `--repo`, setup suggests `<gh login>/workpulse-notes`, the same name the extension's Backup wizard
-suggests. Full guide: `docs/guides/connect-extension-and-claude-code.md`.
+The easiest route for anyone new is the plugin: `/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension`.
+Full guide: `docs/guides/connect-extension-and-claude-code.md`.
 
 Afterwards run `node $WP doctor` and read it back: every ✓/!/✗ line, and what each `!` means. `setup` can be
 re-run any time; it replaces its own hooks and rule and never touches anything else, and it keeps

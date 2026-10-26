@@ -14,7 +14,7 @@
 //   --repo owner/repo --create yes --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
 // A repository that doesn't exist yet is created private with gh (after asking).
 //
-// CLAUDE_HOME overrides ~/.claude (for trying it without touching the real one).
+// CLAUDE_HOME (or Claude Code's own CLAUDE_CONFIG_DIR) overrides ~/.claude.
 
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -22,7 +22,7 @@ import { homedir, hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 
-const CLAUDE = () => process.env.CLAUDE_HOME || join(homedir(), '.claude')
+const CLAUDE = () => process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
 const START = '<!-- workpulse-brain:start -->'
 const END = '<!-- workpulse-brain:end -->'
 
@@ -68,6 +68,53 @@ export function extensionSteps({ repo, branch, tokenUrl }) {
 		`     ${tokenUrl(repo.split('/')[0])}`,
 		`  3. Paste the token, pick ${repo}, press Back up now.`,
 	].join('\n')
+}
+
+/**
+ * True when ~/.claude/settings.json already runs this wp-brain hook itself (from
+ * `setup`). The plugin's copy of the hook then stays quiet, so nothing runs twice.
+ */
+export function settingsRunHook(settingsText, mark) {
+	try {
+		const hooks = JSON.parse(settingsText || '{}').hooks ?? {}
+		return Object.values(hooks).some((groups) => groups?.some?.((g) => g.hooks?.some((h) => String(h.command ?? '').includes(mark))))
+	} catch {
+		return false
+	}
+}
+
+export const settingsHasHook = (mark) => {
+	const p = join(CLAUDE(), 'settings.json')
+	return existsSync(p) && settingsRunHook(readFileSync(p, 'utf8'), mark)
+}
+
+function report(rows) {
+	for (const r of rows) console.log(`${r.ok ? '✓' : r.critical ? '✗' : '!'} ${r.what.padEnd(18)} ${r.detail}`)
+	const bad = rows.filter((r) => !r.ok && r.critical)
+	console.log(bad.length ? `\n${bad.length} problem(s) to fix.` : '\nLinked.')
+	if (bad.length) process.exitCode = 1
+}
+
+/** "workpulse-brain@<marketplace>" when the plugin is installed and not switched off, else null. */
+export function viaPlugin(claude, settings) {
+	try {
+		const p = join(claude, 'plugins', 'installed_plugins.json')
+		const id = Object.keys(JSON.parse(readFileSync(p, 'utf8')).plugins ?? {}).find((k) => k.startsWith('workpulse-brain@'))
+		return id && settings.enabledPlugins?.[id] !== false ? id : null
+	} catch {
+		return null
+	}
+}
+
+/** What the plugin's SessionStart hook tells Claude while the Brain is not linked yet. */
+export function nudgeText() {
+	return [
+		'The WorkPulse Brain plugin is installed but not linked to a repository yet.',
+		'Early in this session, offer the user once, in one line, to link it now; if they say yes, follow the',
+		'"Setup" section of the workpulse-brain skill (it asks the repository with AskUserQuestion, creates it',
+		'private if missing, and prints the browser steps for the extension). If they decline, do not ask again',
+		'in this session.',
+	].join(' ')
 }
 
 /** The global rule, filled in for this machine. */
@@ -271,6 +318,13 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 	const start = has('SessionStart', 'wp-brain.mjs hook')
 	const stop = has('Stop', 'wp-brain.mjs stop-check')
 	const points = (h) => !h || String(h.command).includes(cliPath)
+	// Installed as a Claude Code plugin: the hooks and the skill come from it.
+	const plugin = viaPlugin(claude, settings)
+	if (plugin) {
+		check(true, 'Plugin', `${plugin} — brings the skill and both hooks`, false)
+		if (start || stop) check(true, 'Hooks', 'settings.json has its own copy too; the plugin’s stay quiet, so nothing runs twice', false)
+		return report(rows)
+	}
 	check(!!start && points(start), 'SessionStart hook', start ? (points(start) ? 'installed' : `points at another copy: ${start.command}`) : 'not installed (setup → question 4)', false)
 	check(!!stop && points(stop), 'Stop hook', stop ? (points(stop) ? 'installed' : `points at another copy: ${stop.command}`) : 'not installed (setup → question 5)', false)
 	const md = existsSync(join(claude, 'CLAUDE.md')) ? readFileSync(join(claude, 'CLAUDE.md'), 'utf8') : ''
@@ -278,8 +332,5 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 	const skill = join(claude, 'skills', 'workpulse-brain', 'SKILL.md')
 	check(existsSync(skill), 'Skill', existsSync(skill) ? skill : 'not linked (setup → question 7)', false)
 
-	for (const r of rows) console.log(`${r.ok ? '✓' : r.critical ? '✗' : '!'} ${r.what.padEnd(18)} ${r.detail}`)
-	const bad = rows.filter((r) => !r.ok && r.critical)
-	console.log(bad.length ? `\n${bad.length} problem(s) to fix.` : '\nLinked.')
-	if (bad.length) process.exitCode = 1
+	report(rows)
 }

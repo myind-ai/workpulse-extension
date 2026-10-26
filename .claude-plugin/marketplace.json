@@ -1,0 +1,12 @@
+{
+  "name": "workpulse",
+  "owner": { "name": "myind-ai", "url": "https://github.com/myind-ai" },
+  "description": "WorkPulse: the browser extension's companion for Claude Code.",
+  "plugins": [
+    {
+      "name": "workpulse-brain",
+      "source": "./",
+      "description": "Brief before a ticket, record after a commit, in a private GitHub repo shared with the WorkPulse extension."
+    }
+  ]
+}

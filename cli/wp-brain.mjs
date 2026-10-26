@@ -16,7 +16,7 @@
 // Usage (see `wp-brain help`):
 //   wp-brain setup        asks repo (created private if missing), branch, device, hooks, rule, skill — then installs them (start here)
 //   wp-brain doctor       checks every part of the link
-//   wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]
+//   wp-brain init owner/repo [--branch NAME] [--create] [--steps] [--clone DIR] [--device NAME]
 //   wp-brain add <kind> "title" [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
@@ -24,8 +24,9 @@
 //   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N]
 //   wp-brain report [--days 7] [--scope S]
 //   wp-brain inbox [--ack ID]
-//   wp-brain hook         (Claude Code SessionStart hook: the brief for this branch, as context)
-//   wp-brain stop-check   (Claude Code Stop hook: once per session, ask to record committed work)
+//   wp-brain hook [--plugin]       (Claude Code SessionStart hook: the brief for this branch, as context;
+//                                  --plugin: from the plugin — offers the link when nothing is set up)
+//   wp-brain stop-check [--plugin] (Claude Code Stop hook: once per session, ask to record committed work)
 //   wp-brain sync
 //
 // Writing pushes at once unless --no-push. Nothing that looks like a secret is
@@ -43,7 +44,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	process.exit(1)
 })
 const { KINDS, ROOT, appendLine, entriesPath, filter, fold, newEntry, reportMarkdown, secretsIn, summarise } = bridge
-const { doctor, setup } = await import(join(here, 'setup.mjs'))
+const { doctor, ensureRepo, extensionSteps, nudgeText, settingsHasHook, setup } = await import(join(here, 'setup.mjs'))
 
 const CONFIG = process.env.WP_BRAIN_CONFIG || join(homedir(), '.config', 'workpulse', 'brain.json')
 const DAY = 86_400_000
@@ -203,10 +204,12 @@ The extension's backup folder (\`workpulse/\`) is never written from here.
 const commands = {
 	init({ pos, opt }) {
 		const repo = pos[0]
-		if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) die('Usage: wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]')
-		const clone = opt.clone || join(homedir(), '.workpulse', 'brain')
+		if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) die('Usage: wp-brain init owner/repo [--branch NAME] [--create] [--steps] [--clone DIR] [--device NAME]')
+		const clone = opt.clone || process.env.WP_BRAIN_CLONE || join(homedir(), '.workpulse', 'brain')
 		const device = opt.device || `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`
 		const branch = typeof opt.branch === 'string' ? opt.branch : null
+		// --create: a repository that doesn't exist yet is made private first (gh).
+		if (opt.create && !existsSync(join(clone, '.git'))) console.log(`${repo}: ${ensureRepo({ repo, create: true })}`)
 		if (branch && !existsSync(join(clone, '.git'))) {
 			// One branch of a repository you already have — e.g. a `brain` branch of
 			// a private code repository — holds only the brain: never a full clone of
@@ -243,7 +246,8 @@ const commands = {
 			commitAndPush(cfg, [`${ROOT}/SCHEMA.md`], 'bridge: describe the folder', !opt['no-push'])
 		}
 		console.log(`Ready. ${repo}${branch ? ` (branch ${branch})` : ''} at ${clone}; this machine writes as ${device}.\nConfig: ${CONFIG}`)
-		if (branch) console.log(`In the extension: Settings → Backup → repository ${repo}, branch ${branch}.`)
+		if (opt.steps) console.log(`\n${extensionSteps({ repo, branch, tokenUrl: bridge.tokenUrl })}`)
+		else if (branch) console.log(`In the extension: Settings → Backup → repository ${repo}, branch ${branch}.`)
 	},
 
 	add({ pos, opt }) {
@@ -316,8 +320,21 @@ const commands = {
 	 * the session. Silent — no output, exit 0 — when the brain is not set up, the
 	 * folder is not a git repository, or there is nothing recorded to say.
 	 */
-	hook() {
-		if (!existsSync(CONFIG)) return
+	hook({ opt }) {
+		// --plugin: run from the Claude Code plugin. Quiet when setup already put
+		// the same hook in settings.json; while nothing is linked, it asks Claude to
+		// offer the link, at most once a day.
+		if (opt.plugin && settingsHasHook('wp-brain.mjs hook')) return
+		if (!existsSync(CONFIG)) {
+			if (!opt.plugin) return
+			const stamp = join(dirname(CONFIG), 'nudged-at')
+			const last = existsSync(stamp) ? Number(readFileSync(stamp, 'utf8')) : 0
+			if (Date.now() - last < DAY) return
+			mkdirSync(dirname(stamp), { recursive: true })
+			writeFileSync(stamp, String(Date.now()))
+			process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: nudgeText() } }))
+			return
+		}
 		const { cwd, session, branch, key, remote, head } = sessionContext()
 		if (!branch) return
 		// Remember where this session started, so the stop check can tell whether
@@ -349,7 +366,8 @@ const commands = {
 	 * A commit is the line: work that has not been committed is not finished, and
 	 * asking at every pause would be nagging.
 	 */
-	'stop-check'() {
+	'stop-check'({ opt }) {
+		if (opt.plugin && settingsHasHook('wp-brain.mjs stop-check')) return
 		if (!existsSync(CONFIG)) return
 		const { session, key, head, input } = sessionContext()
 		if (!session || !key || input.stop_hook_active) return

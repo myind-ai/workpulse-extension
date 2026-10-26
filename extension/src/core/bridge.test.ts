@@ -100,6 +100,14 @@ describe('bridge', () => {
 		expect(setupCommands('me/notes', '').setup).not.toContain('--branch')
 	})
 
+	it('offers the Claude Code plugin first, and a sentence that links it', () => {
+		const c = setupCommands('me/notes', 'brain')
+		expect(c.plugin).toBe('/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension')
+		expect(c.pluginOld).toContain('/plugin install workpulse-brain@workpulse')
+		expect(c.ask).toBe('Link my WorkPulse Brain to me/notes (branch brain)')
+		expect(setupCommands('me/notes', '').ask).toBe('Link my WorkPulse Brain to me/notes')
+	})
+
 	it('connects in one line, with the same flags as setup', () => {
 		const c = setupCommands('me/notes', 'brain')
 		expect(c.connect).toBe('curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo me/notes --branch brain')

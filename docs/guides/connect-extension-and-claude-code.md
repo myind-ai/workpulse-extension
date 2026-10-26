@@ -1,6 +1,6 @@
 # Connect the WorkPulse extension and Claude Code to one GitHub repository
 
-Updated: 2026-10-26
+Updated: 2026-10-26 (plugin)
 
 For anyone setting up WorkPulse from scratch: install the extension, link it to a private GitHub repository,
 and link Claude Code to the same repository, so that both read and write one shared Brain. It takes about 5 minutes.
@@ -29,18 +29,45 @@ Use whichever of these is available:
 | Way | How |
 |---|---|
 | Chrome Web Store | *(not yet listed; this guide gets updated once it is)* |
-| Release zip | Download `workpulse-extension-1.1.1-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick the unzipped folder |
+| Release zip | Download `workpulse-extension-1.1.2-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick the unzipped folder |
 | From source | `git clone https://github.com/myind-ai/workpulse-extension && cd workpulse-extension/extension && npm install && npm run build`, then load `extension/.output/chrome-mv3` the same way |
 
-## 2. Connect Claude Code (one line)
+## 2. Connect Claude Code
 
-Paste this into a terminal. Without `--repo`, it suggests `<your GitHub login>/workpulse-notes`:
+### Easiest: the plugin (any OS with Node 22.18+; needs `gh auth login`)
+
+In Claude Code, run:
+
+```text
+/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension
+```
+
+On Claude Code older than 2.1.275, use these two commands instead:
+
+```text
+/plugin marketplace add myind-ai/workpulse-extension
+/plugin install workpulse-brain@workpulse
+```
+
+The plugin brings the skill and both hooks (a brief at session start, an offer to record after a commit). You
+don't edit any settings by hand. In the next session, Claude notices the Brain isn't linked and offers to link it,
+or you can say it yourself:
+
+```text
+Link my WorkPulse Brain to you/workpulse-notes
+```
+
+Claude asks which repository to use, creates it as **private** if it doesn't exist, links this machine, and shows
+you step 3 with your token link filled in. The extension's **Settings → Claude Code & the Brain** panel shows both
+lines with your repository already filled in.
+
+### Or: one terminal line (macOS / Linux), without the plugin
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash
 ```
 
-If you already have a repository, or want a `brain` branch of an existing private repository:
+With an existing repository, or a `brain` branch of one:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo you/workpulse-notes --branch brain
@@ -52,11 +79,12 @@ What it does, asking before each part:
 2. Installs (or updates) the CLI and the skill in `~/workpulse-extension`.
 3. Creates the repository as **private** if it doesn't exist (`gh repo create --private`).
 4. Clones only the Brain branch to `~/.workpulse/brain`, and writes `~/.config/workpulse/brain.json`.
-5. Adds two Claude Code hooks to `~/.claude/settings.json`: a brief at session start, and an offer to record after a commit.
-6. Adds the WorkPulse Brain rule to `~/.claude/CLAUDE.md` and links the `workpulse-brain` skill.
-7. Prints the browser steps for step 3, with your repository and token link filled in.
+5. Adds the two hooks to `~/.claude/settings.json`, and the WorkPulse Brain rule to `~/.claude/CLAUDE.md`.
+   It also links the skill.
+6. Prints the browser steps for step 3, with your repository and token link filled in.
 
 Before changing a file, it saves a `.wp-brain.bak` copy. Re-running it is safe, and it's also how you update.
+If you later install the plugin as well, its hooks stay quiet, so nothing runs twice.
 
 Windows, or if you'd rather not pipe a script into bash:
 
@@ -96,10 +124,11 @@ filled in with your repository.
 |---|---|
 | `Extension seen — no browser has written yet` | Brain page → **+ Add** one entry, or press **Back up now** |
 | `Extension backup — not on this branch yet` | The extension's Branch differs from setup's. Make them the same, then **Back up now** |
-| `SessionStart hook / Stop hook — not installed` | Run the connect line again and answer yes |
+| `SessionStart hook / Stop hook — not installed` | With the plugin, this is expected: the plugin's hooks aren't in `settings.json`. Check `/plugin` shows workpulse-brain as enabled. Without the plugin, run the connect line again and answer yes |
 | `Config missing` | Run the connect line |
 
 ## What changed
 
+- 2026-10-26 (later): the Claude Code plugin is now the easiest way. It needs no settings edits, and Claude offers to link it.
 - 2026-10-26: first version. The one-line installer, repository creation in setup, and the pre-filled token link are new.
   Before this, setup needed an existing repository, and the token page had to be filled in by hand.

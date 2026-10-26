@@ -2,7 +2,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ensureRepo, extensionSteps, placeHook, placeRule, removeHook, ruleText } from './setup.mjs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { ensureRepo, extensionSteps, nudgeText, placeHook, placeRule, removeHook, ruleText, settingsRunHook, viaPlugin } from './setup.mjs'
 
 test('a hook is added beside the others, and replaced rather than doubled on a re-run', () => {
 	const s = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'rtk hook' }] }], Stop: [{ hooks: [{ type: 'command', command: 'other-stop' }] }] } }
@@ -53,4 +57,27 @@ test('the browser steps name the branch, the repository and a pre-filled token p
 	assert.match(text, /TOKEN\?owner=me/)
 	assert.match(text, /pick me\/notes, press Back up now/)
 	assert.match(extensionSteps({ repo: 'me/notes', branch: '', tokenUrl: () => '' }), /default branch/)
+})
+
+test('the plugin hook stays quiet when settings.json already runs the same hook', () => {
+	const s = { hooks: {} }
+	placeHook(s, 'SessionStart', 'node /x/wp-brain.mjs hook 2>/dev/null || true', 'wp-brain.mjs hook')
+	assert.equal(settingsRunHook(JSON.stringify(s), 'wp-brain.mjs hook'), true)
+	assert.equal(settingsRunHook(JSON.stringify(s), 'wp-brain.mjs stop-check'), false)
+	assert.equal(settingsRunHook('{not json', 'wp-brain.mjs hook'), false)
+	assert.equal(settingsRunHook('', 'wp-brain.mjs hook'), false)
+})
+
+test('the not-linked nudge points at the skill and asks only once', () => {
+	assert.match(nudgeText(), /workpulse-brain skill/)
+	assert.match(nudgeText(), /do not ask again/)
+})
+
+test('doctor sees the plugin when it is installed, and not when it is switched off', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'wp-plugin-'))
+	assert.equal(viaPlugin(dir, {}), null)
+	mkdirSync(join(dir, 'plugins'))
+	writeFileSync(join(dir, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'workpulse-brain@workpulse': [{ scope: 'user' }] } }))
+	assert.equal(viaPlugin(dir, {}), 'workpulse-brain@workpulse')
+	assert.equal(viaPlugin(dir, { enabledPlugins: { 'workpulse-brain@workpulse': false } }), null)
 })

@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs\" hook --plugin 2>/dev/null || true",
+            "statusMessage": "WorkPulse Brain brief…"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs\" stop-check --plugin 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
