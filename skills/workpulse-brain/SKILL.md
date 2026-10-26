@@ -37,6 +37,19 @@ which Claude Code may not do on its own:
 ! node $WP setup --repo owner/repo --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
 ```
 
+**A machine without the CLI yet** (a new user, a new laptop) gets the whole thing in one line instead. It
+checks Node 22.18+, git and `gh auth`, installs or updates `~/workpulse-extension`, and runs the same setup.
+A repository that doesn't exist yet is created **private** with `gh` after a yes (`--create yes` skips the
+question). At the end it prints the browser steps with a **pre-filled token link** (name, Contents: Read and
+write, 90 days; only the repository has to be picked):
+
+```bash
+! curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo owner/workpulse-notes --branch brain
+```
+
+With no `--repo`, setup suggests `<gh login>/workpulse-notes`, the same name the extension's Backup wizard
+suggests. Full guide: `docs/guides/connect-extension-and-claude-code.md`.
+
 Afterwards run `node $WP doctor` and read it back: every ✓/!/✗ line, and what each `!` means. `setup` can be
 re-run any time; it replaces its own hooks and rule and never touches anything else, and it keeps
 `.wp-brain.bak` copies. The GitHub token is only ever pasted into the extension (fine-grained, Contents:

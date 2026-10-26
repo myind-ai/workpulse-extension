@@ -9,6 +9,7 @@ import { learningsCsv, learningsMarkdown, timesheetCsv } from './export'
 import { withoutTags, type Learning } from './learn'
 import { firstLine } from './markdown'
 import { ticketKey } from './links'
+import { DEFAULT_REPO_NAME, tokenUrl } from './bridge'
 import { hhmm, istDate, istTime } from './time'
 import type { Entry, Job, Settings } from './types'
 
@@ -419,7 +420,7 @@ const fmtHours = (min: number) => (min < 60 ? `${min}m` : `${Math.floor(min / 60
  * so creating it is one click on a form that is already correct — which beats
  * any amount of instructions about what to name it.
  */
-export function newRepoUrl(name = 'workpulse-notes'): string {
+export function newRepoUrl(name = DEFAULT_REPO_NAME): string {
 	const q = new URLSearchParams({
 		name,
 		description: 'My WorkPulse backup — learnings, tickets and time logs.',
@@ -428,8 +429,8 @@ export function newRepoUrl(name = 'workpulse-notes'): string {
 	return `https://github.com/new?${q}`
 }
 
-/** The fine-grained token page. The permission itself has to be chosen by hand. */
-export const TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new'
+/** The fine-grained token page, pre-filled (Contents: Read and write, 90 days); the repository is picked by hand. */
+export const TOKEN_URL = tokenUrl()
 
 export type SetupStep = 'repo' | 'token' | 'pick' | 'backup' | 'done'
 

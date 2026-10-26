@@ -24,7 +24,7 @@ export default defineConfig({
 	manifest: {
 		name: 'WorkPulse',
 		description: 'Hourly work log, check-in reminders and timesheet push that keep Zoho People gap-free. Works from your own signed-in Zoho tab.',
-		version: '1.1.0',
+		version: '1.1.1',
 		// Pins the extension ID for local installs (private key in .secrets/,
 		// gitignored). The Web Store issues its own id, and rejects a build that
 		// carries someone else's key, so the store build omits it.

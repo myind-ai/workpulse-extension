@@ -127,9 +127,20 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 			{linked && (
 				<div className="wp-stack-sm">
 					<span className="wp-eyebrow">Link Claude Code on a machine</span>
-					<Command label="1. Get the tool and the skill (once per machine; Node 22.18 or newer)" text={cmd.clone} />
-					<Command label="2. Set it up — it asks for the device name, the automatic brief and record, and the global rule, then installs them" text={cmd.setup} />
-					<Command label="3. Check every part of the link" text={cmd.doctor} />
+					<Command
+						label="Paste this in a terminal (macOS / Linux). It checks Node 22.18+, git and your gh login, installs the tool and the skill, then asks before setting up the brief, the record and the rule. Run it again any time to update."
+						text={cmd.connect}
+					/>
+					<details className="wp-small">
+						<summary className="wp-link" style={{ cursor: 'pointer' }}>
+							Windows, or rather not pipe a script into bash
+						</summary>
+						<div className="wp-stack-sm" style={{ marginTop: 6 }}>
+							<Command label="1. Get the tool and the skill (once per machine; Node 22.18 or newer, and gh auth login)" text={cmd.clone} />
+							<Command label="2. Set it up" text={cmd.setup} />
+						</div>
+					</details>
+					<Command label="Then check every part of the link" text={cmd.doctor} />
 					<p className="wp-muted wp-small" style={{ margin: 0 }}>
 						After that: Claude reads the Brain before a ticket, records mistakes as they happen, and after you commit it is asked once to record the session. What you
 						write here on the Learnings page reaches Claude through the daily backup.

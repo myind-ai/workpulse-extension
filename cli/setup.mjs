@@ -11,7 +11,8 @@
 //   - the workpulse-brain skill, linked into ~/.claude/skills
 // Settings files are backed up before they are written, and every step can be
 // re-run safely. Answers can be given as flags for a non-interactive run:
-//   --repo owner/repo --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
+//   --repo owner/repo --create yes --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
+// A repository that doesn't exist yet is created private with gh (after asking).
 //
 // CLAUDE_HOME overrides ~/.claude (for trying it without touching the real one).
 
@@ -33,6 +34,40 @@ async function ask(rl, flag, question, fallback) {
 	if (!rl) return fallback
 	const got = (await rl.question(`${question}${fallback ? ` [${fallback}]` : ''}: `)).trim()
 	return got || fallback
+}
+
+/** Runs a command and returns its output, or null when it fails or is missing. */
+const run = (cmd, args) => {
+	try {
+		return execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }).trim()
+	} catch {
+		return null
+	}
+}
+
+/**
+ * Makes sure the Brain repository exists, creating it private when asked to.
+ * Returns 'exists', 'created', or throws with what to do instead. `sh` is
+ * injectable for tests.
+ */
+export function ensureRepo({ repo, create, sh = run }) {
+	if (sh('gh', ['repo', 'view', repo, '--json', 'name']) != null) return 'exists'
+	if (sh('gh', ['--version']) == null) throw new Error(`Can't check ${repo}: the GitHub CLI is missing. Install https://cli.github.com, run gh auth login, then run setup again.`)
+	if (!create) throw new Error(`${repo} doesn't exist (or this gh login can't see it). Create it private on GitHub, or run setup again with --create yes.`)
+	const made = sh('gh', ['repo', 'create', repo, '--private', '--description', 'My WorkPulse backup and Brain — learnings, tickets and time logs.'])
+	if (made == null) throw new Error(`Couldn't create ${repo}. Check gh auth status, or create it on GitHub and run setup again.`)
+	return 'created'
+}
+
+/** What is left to do in the browser, with the token page pre-filled. */
+export function extensionSteps({ repo, branch, tokenUrl }) {
+	return [
+		'Now the extension (Chrome → WorkPulse → Settings → Backup):',
+		`  1. Branch: ${branch || '(leave empty — the default branch)'}`,
+		`  2. Make a token — this page is pre-filled; pick only ${repo} under Repository access:`,
+		`     ${tokenUrl(repo.split('/')[0])}`,
+		`  3. Paste the token, pick ${repo}, press Back up now.`,
+	].join('\n')
 }
 
 /** The global rule, filled in for this machine. */
@@ -107,12 +142,21 @@ export function removeHook(settings, event, mark) {
 	return settings
 }
 
-export async function setup({ opt, cliPath, skillDir, init }) {
+export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpulse-notes', tokenUrl = () => 'https://github.com/settings/personal-access-tokens/new' }) {
 	const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null
 	try {
 		console.log('Link Claude Code on this machine to the WorkPulse Brain. Enter keeps the [default].\n')
-		const repo = await ask(rl, opt.repo, '1. Brain repository (owner/repo — the one set in the extension’s Settings → Backup)', '')
+		const login = opt.repo ? null : run('gh', ['api', 'user', '--jq', '.login'])
+		const repo = await ask(rl, opt.repo, '1. Brain repository (owner/repo — the one set in the extension’s Settings → Backup; a new one is created private)', login ? `${login}/${repoName}` : '')
 		if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('A repository is needed, as owner/repo.')
+		if (!opt['no-push']) {
+			let made = 'exists'
+			if (run('gh', ['repo', 'view', repo, '--json', 'name']) == null) {
+				const create = yes(await ask(rl, opt.create, `   ${repo} doesn't exist yet. Create it as a private repository? y/n`, 'y'))
+				made = ensureRepo({ repo, create })
+			}
+			console.log(`   ✓ ${repo} ${made === 'created' ? 'created (private)' : 'found'}`)
+		}
 		const branch = await ask(rl, opt.branch, '2. Branch (the same as the extension’s Backup → Branch; "-" for the default branch)', 'brain')
 		const device = await ask(rl, opt.device, '3. This machine’s name in the Brain', `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`)
 		const brief = yes(await ask(rl, opt.brief, '4. Brief Claude at the start of every session on a ticket branch? (SessionStart hook) y/n', 'y'))
@@ -169,7 +213,7 @@ export async function setup({ opt, cliPath, skillDir, init }) {
 			console.log(`✓ Skill ${state}: ${target}`)
 		}
 
-		console.log(`\nDone. In Chrome: WorkPulse → Settings → Backup → Branch "${br || '(default)'}", repository ${repo}, then Claude Code & the Brain shows this machine once it writes.\nCheck everything: node ${cliPath} doctor`)
+		console.log(`\nClaude Code is linked.\n\n${extensionSteps({ repo, branch: br, tokenUrl })}\n\nThen Settings → Claude Code & the Brain shows this machine. Check every part: node ${cliPath} doctor`)
 	} finally {
 		rl?.close()
 	}

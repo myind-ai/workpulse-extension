@@ -231,7 +231,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 
 					<Step n={2} title={state.hasToken ? 'Token saved' : 'Make a token for it'} active={step === 'token' || step === 'repo'} done={state.hasToken}>
 						<p className="wp-muted wp-small">
-							On the page this opens, set exactly three things:
+							The page this opens is already filled in: name <em>WorkPulse Brain</em>, <strong>Contents: Read and write</strong>, 90 days. One thing is left for you:
 						</p>
 						<ul className="wp-md-list wp-small wp-muted">
 							<li>
@@ -239,17 +239,10 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 								able to write to that one and nothing else.
 							</li>
 							<li>
-								<strong>Repository permissions</strong> → find <strong>Contents</strong> in that long list → <em>Read and write</em>.{' '}
-								<strong>That is the only one.</strong> GitHub adds <em>Metadata: Read-only</em> by itself and will not let you remove it — that is normal and is all it needs.
-							</li>
-							<li>
-								<strong>Expiration</strong> → whatever you are comfortable with; WorkPulse says so plainly when a token stops working
+								Then <strong>Generate token</strong> and paste it below. GitHub adds <em>Metadata: Read-only</em> by itself — that is normal. Leave every other
+								permission on <em>No access</em>; WorkPulse writes files and does nothing else.
 							</li>
 						</ul>
-						<p className="wp-muted wp-small">
-							Leave every other permission in that list on <em>No access</em> — Actions, Administration, Issues, Pull requests, Secrets, Workflows, all of them. WorkPulse
-							writes files and does nothing else.
-						</p>
 						<div className="wp-row">
 							<a className="wp-btn wp-btn-sm" href={TOKEN_URL} target="_blank" rel="noreferrer">
 								Open the token page →

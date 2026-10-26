@@ -14,7 +14,7 @@
 // never disagree about what an entry is.
 //
 // Usage (see `wp-brain help`):
-//   wp-brain setup        asks repo, branch, device, hooks, rule, skill — then installs them (start here)
+//   wp-brain setup        asks repo (created private if missing), branch, device, hooks, rule, skill — then installs them (start here)
 //   wp-brain doctor       checks every part of the link
 //   wp-brain init owner/repo [--branch NAME] [--clone DIR] [--device NAME]
 //   wp-brain add <kind> "title" [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
@@ -416,7 +416,7 @@ const commands = {
 
 	/** Asks, then installs the clone, the hooks, the global rule and the skill (cli/setup.mjs). */
 	setup({ opt }) {
-		return setup({ opt, cliPath: fileURLToPath(import.meta.url), skillDir: join(here, '..', 'skills', 'workpulse-brain'), init: commands.init })
+		return setup({ opt, cliPath: fileURLToPath(import.meta.url), skillDir: join(here, '..', 'skills', 'workpulse-brain'), init: commands.init, repoName: bridge.DEFAULT_REPO_NAME, tokenUrl: bridge.tokenUrl })
 	},
 
 	/** Every part of the link, checked. */

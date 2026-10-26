@@ -278,13 +278,39 @@ export const SOURCE_REPO = 'https://github.com/myind-ai/workpulse-extension'
  * branch. `setup` asks for everything else (device name, hooks, the global
  * rule) and installs it; `doctor` says what is and is not linked.
  */
-export function setupCommands(repo: string, branch: string, dir = '~/workpulse-extension'): { clone: string; setup: string; doctor: string } {
+export function setupCommands(repo: string, branch: string, dir = '~/workpulse-extension'): { connect: string; clone: string; setup: string; doctor: string } {
 	const cli = `node ${dir}/cli/wp-brain.mjs`
+	const flags = `--repo ${repo}${branch ? ` --branch ${branch}` : ''}`
 	return {
+		// One line for macOS / Linux: checks Node, git and the gh login, installs or
+		// updates the CLI, then runs setup. clone + setup are the same by hand.
+		connect: `curl -fsSL ${INSTALL_URL} | bash -s -- ${flags}`,
 		clone: `git clone ${SOURCE_REPO}.git ${dir}`,
-		setup: `${cli} setup --repo ${repo}${branch ? ` --branch ${branch}` : ''}`,
+		setup: `${cli} setup ${flags}`,
 		doctor: `${cli} doctor`,
 	}
+}
+
+/** The installer behind setupCommands().connect. */
+export const INSTALL_URL = 'https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh'
+
+/** The name the extension and the CLI both suggest for a new Brain repository. */
+export const DEFAULT_REPO_NAME = 'workpulse-notes'
+
+/**
+ * The fine-grained token page with everything GitHub lets a link fill in:
+ * name, note, 90-day expiry and Contents: Read and write. Which repository it
+ * may touch cannot be pre-filled — the person picks only the Brain repository.
+ */
+export function tokenUrl(owner = ''): string {
+	const q = new URLSearchParams({
+		name: 'WorkPulse Brain',
+		description: 'WorkPulse extension: back up and read the Brain. Select only your Brain repository.',
+		expires_in: '90',
+		contents: 'write',
+		...(owner ? { target_name: owner } : {}),
+	})
+	return `https://github.com/settings/personal-access-tokens/new?${q}`
 }
 
 /** Which files under bridge/ moved since last time, by blob sha. */

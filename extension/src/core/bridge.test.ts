@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise } from './bridge'
+import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise, tokenUrl } from './bridge'
 
 const AT = Date.UTC(2026, 9, 25, 10, 0)
 const e = (o: Record<string, unknown>) => JSON.stringify({ id: 'x', at: AT, kind: 'note', title: 't', ...o })
@@ -98,6 +98,21 @@ describe('bridge', () => {
 		expect(c.clone).toBe('git clone https://github.com/myind-ai/workpulse-extension.git ~/workpulse-extension')
 		expect(c.setup).toBe('node ~/workpulse-extension/cli/wp-brain.mjs setup --repo me/notes --branch brain')
 		expect(setupCommands('me/notes', '').setup).not.toContain('--branch')
+	})
+
+	it('connects in one line, with the same flags as setup', () => {
+		const c = setupCommands('me/notes', 'brain')
+		expect(c.connect).toBe('curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo me/notes --branch brain')
+	})
+
+	it('pre-fills the token page with Contents: write and nothing else', () => {
+		const u = new URL(tokenUrl('me'))
+		expect(u.origin + u.pathname).toBe('https://github.com/settings/personal-access-tokens/new')
+		expect(u.searchParams.get('contents')).toBe('write')
+		expect(u.searchParams.get('target_name')).toBe('me')
+		expect(u.searchParams.get('expires_in')).toBe('90')
+		expect([...u.searchParams.keys()].sort()).toEqual(['contents', 'description', 'expires_in', 'name', 'target_name'])
+		expect(new URL(tokenUrl()).searchParams.has('target_name')).toBe(false)
 	})
 
 	it('fetches only entry files whose sha moved', () => {
