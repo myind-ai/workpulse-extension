@@ -29,8 +29,28 @@ Use whichever of these is available:
 | Way | How |
 |---|---|
 | Chrome Web Store | *(not yet listed; this guide gets updated once it is)* |
-| Release zip | Download `workpulse-extension-1.3.0-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick the unzipped folder |
+| One line (Mac, Linux) | `curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh \| bash` puts the latest release in `~/WorkPulse/extension`. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick that folder. The same line updates it later |
+| Release zip | Download `workpulse-extension-1.4.0-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it into a folder you keep (e.g. `~/WorkPulse/extension`). In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick that folder |
 | From source | `git clone https://github.com/myind-ai/workpulse-extension && cd workpulse-extension/extension && npm install && npm run build`, then load `extension/.output/chrome-mv3` the same way |
+
+### Updating
+
+Chrome does not update an extension loaded with **Load unpacked**. WorkPulse asks GitHub once a day and shows
+**WorkPulse x.y is out** at the top of its dashboard (Settings → **Updates** has the same, plus **Check now**).
+
+1. Run the update line in a terminal. It replaces the files *inside* the folder you loaded, keeps the old ones in
+   `<folder>.previous`, and refuses any folder that does not hold WorkPulse:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh | bash -s -- --dir "/the/folder/you/loaded"   # first time, if not ~/WorkPulse/extension
+   ```
+
+2. Press **Reload** on the notice (or ↻ on `chrome://extensions`). Everything saved stays.
+
+**Never click Remove to update**: that deletes the extension's data. On Windows, download the zip, unzip it over the
+folder you loaded (replacing the files), then Reload. With the plugin, you can also ask Claude Code to "update the
+WorkPulse extension".
 
 ## 2. Connect Claude Code
 
@@ -128,6 +148,8 @@ filled in with your repository.
 | `Config missing` | Run the connect line |
 
 ## What changed
+
+- 2026-10-27: one-line install and update (`update.sh`), the in-extension update notice, and the Updating section.
 
 - 2026-10-26 (later): the Claude Code plugin is now the easiest way. It needs no settings edits, and Claude offers to link it.
 - 2026-10-26: first version. The one-line installer, repository creation in setup, and the pre-filled token link are new.

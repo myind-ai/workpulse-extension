@@ -36,7 +36,8 @@ function Step({ ok, warn, children }: { ok: boolean; warn?: boolean; children: R
 	)
 }
 
-function Command({ label, text }: { label: string; text: string }) {
+/** A label, a one-line command and Copy. Also used by Settings → Updates. */
+export function Command({ label, text }: { label: string; text: string }) {
 	const { busy, run } = useAction()
 	return (
 		<div className="wp-stack-sm">

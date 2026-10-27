@@ -1,7 +1,7 @@
 {
   "name": "workpulse-extension",
   "description": "WorkPulse \u2014 hourly work log, check-in and regularisation reminders for Zoho People.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {

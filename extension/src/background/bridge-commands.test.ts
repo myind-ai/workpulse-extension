@@ -118,3 +118,53 @@ describe('filters and the page you are on', () => {
 		expect((await cmd.relatedContext('https://example.com/')).total).toBe(0)
 	})
 })
+
+describe('update check', () => {
+	beforeEach(() => vi.stubGlobal('chrome', { runtime: { getManifest: () => ({ version: '1.3.0' }), reload: vi.fn() } }))
+	const release = (v: string) => ({ ok: true, json: async () => ({ tag_name: `v${v}`, html_url: `https://github.com/r/releases/tag/v${v}`, body: '- New', assets: [{ browser_download_url: `https://x/workpulse-extension-${v}-chrome.zip` }] }) })
+	const current = () => chrome.runtime.getManifest().version
+
+	it('asks GitHub once a day, and Check now asks again', async () => {
+		const fetchFn = vi.fn(async () => release('99.0.0'))
+		vi.stubGlobal('fetch', fetchFn)
+		expect((await cmd.checkForUpdate())?.version).toBe('99.0.0')
+		await cmd.checkForUpdate()
+		expect(fetchFn).toHaveBeenCalledTimes(1)
+		await cmd.checkForUpdate(true)
+		expect(fetchFn).toHaveBeenCalledTimes(2)
+		const u = await cmd.updateState()
+		expect(u).toMatchObject({ current: current(), latest: { version: '99.0.0' }, on: true, storeInstall: false })
+		expect(u.command).toContain('update.sh | bash')
+		vi.unstubAllGlobals()
+	})
+
+	it('does nothing for a Web Store install, which Chrome updates itself', async () => {
+		const fetchFn = vi.fn(async () => release('99.0.0'))
+		vi.stubGlobal('fetch', fetchFn)
+		vi.stubGlobal('chrome', { runtime: { getManifest: () => ({ version: '1.3.0', update_url: 'https://clients2.google.com/service/update2/crx' }) } })
+		await cmd.checkForUpdate(true)
+		expect(fetchFn).not.toHaveBeenCalled()
+		expect((await cmd.updateState()).storeInstall).toBe(true)
+		vi.unstubAllGlobals()
+	})
+
+	it('stays quiet when GitHub fails, unless asked', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })))
+		expect(await cmd.checkForUpdate()).toBeNull()
+		expect((await cmd.updateState()).error).toContain('403')
+		await expect(cmd.checkForUpdate(true)).rejects.toThrow('403')
+		vi.unstubAllGlobals()
+	})
+
+	it('does not ask when switched off, and Not now is for that version only', async () => {
+		const fetchFn = vi.fn(async () => release('99.0.0'))
+		vi.stubGlobal('fetch', fetchFn)
+		await store.saveSettings({ updateCheck: false })
+		await cmd.checkForUpdate()
+		expect(fetchFn).not.toHaveBeenCalled()
+		await cmd.checkForUpdate(true)
+		await cmd.dismissUpdate('99.0.0')
+		expect((await cmd.updateState()).dismissed).toBe('99.0.0')
+		vi.unstubAllGlobals()
+	})
+})

@@ -2,6 +2,7 @@
 // so the phase 3 bridge can sync records by `uid`. Instants are epoch ms.
 
 import type { BridgeEntry } from './bridge'
+import type { Release } from './update'
 import type { NudgeKind } from './health'
 import type { Tier } from './licence'
 
@@ -35,6 +36,8 @@ export interface Settings {
 	learnLoop: boolean
 	/** On a ticket, pull request or staging page, say what the Brain has for it. Once per tab per page. */
 	brainOnPages: boolean
+	/** Ask GitHub once a day whether a newer WorkPulse is out (zip installs only; the Web Store updates itself). */
+	updateCheck: boolean
 	/** Ring, not just show, when the check-in is overdue — once a day. */
 	alarmCheckIn: boolean
 	/** Ring at the end of the shift, so the day gets closed. */
@@ -153,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	learnPrompt: true,
 	learnLoop: true,
 	brainOnPages: true,
+	updateCheck: true,
 	alarmCheckIn: true,
 	alarmCheckOut: true,
 	breakAfterHours: 3,
@@ -419,6 +423,8 @@ export interface Runtime {
 		/** Entries saved while there was no repository or no network, sent on the next sync. */
 		queue?: BridgeEntry[]
 	}
+	/** The newest release GitHub reported, when it was asked, which one was dismissed, and the version that ran last. */
+	update?: { latest?: Release; checkedAt?: number; dismissed?: string; seen?: string; error?: string }
 	/** A recording in progress: what it is of, and when it stops itself. */
 	clip?: { startedAt: number; seconds: number; url?: string; title?: string }
 	/** The last thing that could be put back, and the record as it was. */

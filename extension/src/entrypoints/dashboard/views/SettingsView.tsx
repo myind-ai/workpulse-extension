@@ -7,6 +7,7 @@ import { API_ENABLED } from '@/core/features'
 import { istDate } from '@/core/time'
 import type { Settings, ZohoMode } from '@/core/types'
 import { call } from '@/lib/rpc'
+import { newer } from '@/core/update'
 import { useAction, useLive } from '@/ui/hooks'
 
 import { Meetings } from './Meetings'
@@ -15,7 +16,7 @@ import { Panel } from '@/ui/Panel'
 import { TrustCentre } from '@/ui/TrustCentre'
 
 import { Backup, Support } from './Backup'
-import { ClaudeCode } from './ClaudeCode'
+import { ClaudeCode, Command } from './ClaudeCode'
 import { Health } from './Health'
 import { Blocks, Prefixes, Recall, Shortcuts, Strays, Zones } from './Zones'
 import { TimeField } from '@/ui/TimeField'
@@ -350,6 +351,10 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 				</div>
 			</Panel>
 
+			<Panel title="Updates" hint="Hear when a newer WorkPulse is out, and update it in place" keywords="update upgrade version release new reload github zip">
+				<UpdatesPanel checked={form.updateCheck} onToggle={(v) => set('updateCheck', v)} />
+			</Panel>
+
 			<Panel title="Advanced" hint="Grace, wrap-up delay, data centre, clearing a day" keywords="advanced grace wrapup delay scopes data centre clear restore test">
 				<div className="wp-stack">
 					<div className="wp-grid-2">
@@ -611,5 +616,39 @@ function Llm() {
 				{error && <span className="wp-error wp-small">{error}</span>}
 			</div>
 		</Panel>
+	)
+}
+
+/** Settings → Updates: the switch, the version running, Check now, and the update line. */
+function UpdatesPanel({ checked, onToggle }: { checked: boolean; onToggle: (v: boolean) => void }) {
+	const { data: u, reload } = useLive(() => call('updateState'))
+	const check = useAction()
+	if (!u) return null
+	if (u.storeInstall) return <div className="wp-muted wp-small">Installed from the Chrome Web Store: Chrome updates it by itself. You have {u.current}.</div>
+	const latest = u.latest?.version
+	return (
+		<div className="wp-stack-sm wp-small">
+			<label className="wp-row" style={{ gap: 8 }}>
+				<input type="checkbox" checked={checked} onChange={(e) => onToggle(e.target.checked)} />
+				<span>
+					Tell me when a newer version is out <span className="wp-muted">— asks GitHub once a day; nothing about you is sent</span>
+				</span>
+			</label>
+			<div className="wp-row-wrap">
+				<span>
+					You have <strong>{u.current}</strong>
+					{latest ? (newer(latest, u.current) ? <> · <strong>{latest}</strong> is out</> : ' · the latest') : ''}
+					{u.checkedAt ? <span className="wp-muted"> · checked {new Date(u.checkedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span> : null}
+				</span>
+				<button className="wp-btn wp-btn-sm" disabled={check.busy} onClick={() => check.run(async () => void (await call('checkForUpdate', true), await reload()))}>
+					{check.busy ? 'Checking…' : 'Check now'}
+				</button>
+				<button className="wp-btn wp-btn-sm" onClick={() => void call('reloadExtension')} title="Load the files in the folder again. Nothing saved is lost.">
+					Reload
+				</button>
+			</div>
+			{(check.error || u.error) && <div className="wp-muted">Could not ask GitHub: {check.error || u.error}</div>}
+			<Command label={'Update in place (keeps your data; add -s -- --dir "/folder" once if you loaded another folder than ~/WorkPulse/extension), then press Reload:'} text={u.command} />
+		</div>
 	)
 }

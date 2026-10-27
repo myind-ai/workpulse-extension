@@ -714,8 +714,13 @@ export default defineBackground(() => {
 	void ensureAlarm()
 
 	chrome.alarms.onAlarm.addListener((a) => {
-		if (a.name === TICK) void tick()
+		if (a.name !== TICK) return
+		void tick()
+		// Once a day, and only for a zip install; it returns at once otherwise.
+		void commands.checkForUpdate().catch(() => undefined)
 	})
+	// The version that ran first is the one "updated to …" is measured from.
+	void store.runtime().then((rt) => (rt.update?.seen ? undefined : commands.seenVersion())).catch(() => undefined)
 	chrome.idle.onStateChanged.addListener(() => void tick())
 
 	chrome.runtime.onMessage.addListener((msg: CallMessage, _sender, sendResponse) => {

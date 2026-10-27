@@ -1,6 +1,6 @@
 ---
 name: workpulse-brain
-description: Keep a running memory of every ticket, bug, debugging session, report, skill and side project in the WorkPulse bridge (a private GitHub repo the WorkPulse browser extension reads too). Read the brief BEFORE starting a ticket; write what was asked, done, broken and learned AFTER. Triggers on "start ticket", "working on PAY-123", "what did I learn about", "log this mistake", "record the root cause", "end of ticket", "write it to my brain", "weekly report", "what did I do this week", "side project log", "check the workpulse inbox", "wp-brain".
+description: Keep a running memory of every ticket, bug, debugging session, report, skill and side project in the WorkPulse bridge (a private GitHub repo the WorkPulse browser extension reads too). Read the brief BEFORE starting a ticket; write what was asked, done, broken and learned AFTER. Triggers on "start ticket", "working on PAY-123", "what did I learn about", "log this mistake", "record the root cause", "end of ticket", "write it to my brain", "weekly report", "what did I do this week", "side project log", "check the workpulse inbox", "wp-brain", "update the workpulse extension".
 ---
 
 # WorkPulse Brain
@@ -167,6 +167,21 @@ the extension builds them in memory. The graph chains records that share a
 ticket, project or tag. Search is lexical and
 evidence-based today: it ranks title, subtitle, tags, and body matches; it does
 not claim semantic similarity that has not been verified.
+
+## Updating the extension
+
+When the user asks to update the WorkPulse extension (or its dashboard says a newer version is out), run the
+updater. It replaces the files inside the folder Chrome loads, keeps `<folder>.previous`, and refuses a folder that
+does not hold WorkPulse. Then tell the user to press **Reload** in WorkPulse. Never tell them to Remove the extension:
+that deletes its data.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh | bash -s -- --check   # what it would do
+curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh | bash                 # do it
+```
+
+If it says the folder has no WorkPulse manifest, ask which folder they picked in **Load unpacked** and pass
+`-s -- --dir "/that/folder"` (remembered afterwards).
 
 ## Gotchas
 

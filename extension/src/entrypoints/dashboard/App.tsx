@@ -1,5 +1,6 @@
 // Dashboard tab: Today · Review · Tasks · Regularisation · Settings (hash routes).
 
+import { UpdateBanner } from '@/ui/UpdateBanner'
 import { useEffect, useState } from 'react'
 
 import { API_ENABLED, enabled } from '@/core/features'
@@ -141,6 +142,7 @@ export function App() {
 					</div>
 				</nav>
 				<main className="wp-main">
+					<UpdateBanner />
 					{route.view === 'today' && <TodayView />}
 					{route.view === 'review' && <ReviewView date={route.arg} />}
 					{route.view === 'tasks' && <TasksView />}

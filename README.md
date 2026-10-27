@@ -22,9 +22,17 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
 
 ## Get started in 5 minutes
 
-1. **Install the extension**: download `workpulse-extension-1.1.2-chrome.zip` from
-   [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. Then open
-   `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped folder.
+1. **Install the extension**: on a Mac or Linux, run
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh | bash
+   ```
+
+   which puts the latest release in `~/WorkPulse/extension` (or download the `-chrome.zip` from
+   [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it into a folder you
+   keep). Then open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick that folder.
+   **To update later**, run the same line and press **Reload** on the notice WorkPulse shows when a new version is out.
+   Never Remove the extension to update it: that deletes its data.
 2. **Connect Claude Code**: in Claude Code, run
 
    ```text

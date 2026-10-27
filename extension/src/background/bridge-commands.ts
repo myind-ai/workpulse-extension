@@ -11,6 +11,7 @@
 import { appendLine, changedFiles, devicesOf, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type Device, type InboxMessage, type Summary } from '@/core/bridge'
 import { brainRecord, openWork, type OpenWork } from '@/core/brain-index'
 import { relatedTo } from '@/core/brain-query'
+import { dueForCheck, readRelease, RELEASES_API, UPDATE_CMD, type Release, type UpdateState } from '@/core/update'
 import { enabled } from '@/core/features'
 import { parseRepo } from '@/core/sync'
 import { GitHub } from '@/lib/github'
@@ -299,5 +300,58 @@ export class BridgeCommands extends PageCommands {
 	}
 }
 
+/**
+ * Updates, for a zip install. Chrome updates a Web Store install by itself
+ * (its manifest has an update_url) and never updates an unpacked one, so this
+ * asks GitHub once a day which release is the latest. Unauthenticated: one
+ * request a day is far inside GitHub's 60 an hour, and no token is involved.
+ */
+export class UpdateCommands extends BridgeCommands {
+	private storeInstall = () => !!(chrome.runtime.getManifest() as { update_url?: string }).update_url
+
+	async updateState(): Promise<UpdateState & { on: boolean; storeInstall: boolean; command: string }> {
+		const [s, rt] = await Promise.all([this.store.settings(), this.store.runtime()])
+		const current = chrome.runtime.getManifest().version
+		return { current, ...rt.update, on: s.updateCheck, storeInstall: this.storeInstall(), command: UPDATE_CMD }
+	}
+
+	/** Once a day unless `force`; quiet on failure (the notice simply does not appear). */
+	async checkForUpdate(force = false): Promise<Release | null> {
+		const [s, rt] = await Promise.all([this.store.settings(), this.store.runtime()])
+		const now = this.now()
+		if (this.storeInstall() || (!force && (!s.updateCheck || !dueForCheck(rt.update?.checkedAt, now)))) return rt.update?.latest ?? null
+		try {
+			const res = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
+			if (!res.ok) throw new Error(`GitHub answered ${res.status}`)
+			const latest = readRelease(await res.json())
+			await this.store.updateRuntime((r) => void (r.update = { ...r.update, latest: latest ?? r.update?.latest, checkedAt: now, error: undefined }))
+			this.env.ui.changed()
+			return latest
+		} catch (e) {
+			await this.store.updateRuntime((r) => void (r.update = { ...r.update, checkedAt: now, error: (e as Error).message }))
+			if (force) throw e
+			return null
+		}
+	}
+
+	/** "Not now" for this version; the next one is told about again. */
+	async dismissUpdate(version: string): Promise<void> {
+		await this.store.updateRuntime((r) => void (r.update = { ...r.update, dismissed: version }))
+		this.env.ui.changed()
+	}
+
+	/** The "updated to …" note has been read: remember the running version. */
+	async seenVersion(): Promise<void> {
+		const v = chrome.runtime.getManifest().version
+		await this.store.updateRuntime((r) => void (r.update = { ...r.update, seen: v }))
+		this.env.ui.changed()
+	}
+
+	/** After update.sh has put the new files in the folder: load them. Saved data stays. */
+	async reloadExtension(): Promise<void> {
+		setTimeout(() => chrome.runtime.reload(), 150)
+	}
+}
+
 /** The full command surface the UI can call (see lib/rpc.ts). */
-export class Commands extends BridgeCommands {}
+export class Commands extends UpdateCommands {}
