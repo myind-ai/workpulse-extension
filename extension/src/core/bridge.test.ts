@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise, tokenUrl } from './bridge'
+import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, JIRA_COMMANDS, linkTestCode, linkTestFound, linkTestPhrase, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise, tokenUrl } from './bridge'
 
 const AT = Date.UTC(2026, 9, 25, 10, 0)
 const e = (o: Record<string, unknown>) => JSON.stringify({ id: 'x', at: AT, kind: 'note', title: 't', ...o })
@@ -131,5 +131,30 @@ describe('bridge', () => {
 		])
 		expect(got.fetch).toEqual(['bridge/entries/2026-10/b.jsonl'])
 		expect(Object.keys(got.shas)).toHaveLength(2)
+	})
+})
+
+describe('the end-to-end link test', () => {
+	const learning = (title: string, device: string, at: number) => newEntry({ kind: 'learning', scope: 'personal', title }, device, at)
+
+	it('should give each browser its own code, the same every time', () => {
+		expect(linkTestCode('ext-ab12cd')).toBe('wp-link-ab12cd')
+		expect(linkTestPhrase('ext-ab12cd')).toBe('Save it as a learning: WorkPulse link test wp-link-ab12cd')
+	})
+
+	it('should pass only on a Claude Code machine writing this browser\'s code, and report the newest', () => {
+		const entries = [
+			learning('WorkPulse link test wp-link-ab12cd', 'ext-ab12cd', 1), // this browser wrote it: proves nothing about Claude Code
+			learning('WorkPulse link test wp-link-zz99zz', 'cli-mac', 2), // another browser's code
+			learning('workpulse link test WP-LINK-AB12CD', 'cli-mac', 3), // however Claude capitalised it
+			learning('WorkPulse link test wp-link-ab12cd', 'cli-work', 4),
+		]
+		expect(linkTestFound(entries, 'ext-ab12cd')).toMatchObject({ device: 'cli-work', at: 4 })
+		expect(linkTestFound(entries.slice(0, 2), 'ext-ab12cd')).toBeNull()
+	})
+
+	it('should hand over the Jira plugin commands from the same marketplace as the Brain plugin', () => {
+		expect(JIRA_COMMANDS.plugin).toContain('--marketplace myind-ai/workpulse-extension')
+		expect(setupCommands('me/notes', 'brain').plugin).toContain('--marketplace myind-ai/workpulse-extension')
 	})
 })

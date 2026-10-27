@@ -12,7 +12,9 @@
 // this panel points at them rather than repeating them) and BrainView (which
 // shows the entries; this shows only the state of the link).
 
-import { setupCommands } from '@/core/bridge'
+import { useState } from 'react'
+
+import { JIRA_COMMANDS, linkTestFound, linkTestPhrase, setupCommands } from '@/core/bridge'
 import { enabled } from '@/core/features'
 import { istDate, prettyDate } from '@/core/time'
 import type { Settings } from '@/core/types'
@@ -57,6 +59,8 @@ export function Command({ label, text }: { label: string; text: string }) {
 export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch: Patch }) {
 	const { data, reload } = useLive(() => call('bridge'))
 	const act = useAction()
+	const test = useAction()
+	const [checked, setChecked] = useState(false)
 	if (!enabled('BRAIN') || !enabled('BRIDGE_SYNC')) return null
 
 	const repo = data?.repo || settings.syncRepo
@@ -64,6 +68,8 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 	const cli = data?.devices.filter((d) => d.kind === 'cli') ?? []
 	const linked = !!repo && !!data?.hasToken
 	const cmd = setupCommands(repo || 'owner/repo', branch)
+	const device = data?.device ?? 'ext-…'
+	const proof = data ? linkTestFound(data.entries, data.device) : null
 
 	return (
 		<Panel
@@ -125,11 +131,85 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 			</ol>
 			{act.error && <div className="wp-error wp-small">{act.error}</div>}
 
+			{/* The whole flow, always on screen: before the backup exists it says that is step 1, rather
+			    than hiding how Claude Code is linked until it is. */}
+			<div className="wp-stack-sm">
+				<span className="wp-eyebrow">Set it up, step by step</span>
+				<ol className="wp-stack-sm wp-small" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+					<Step ok={linked}>
+						<strong>1. Backup</strong> {linked ? <>— <code>{repo}</code>{branch ? <>, branch <code>{branch}</code></> : null}</> : '— a repository and a token, in Backup above. About two minutes.'}
+						{!linked && (
+							<button className="wp-action" style={{ marginLeft: 8 }} onClick={() => (location.hash = '#/settings/backup')}>
+								open Backup
+							</button>
+						)}
+					</Step>
+					<Step ok={cli.length > 0}>
+						<strong>2. Install the plugin in Claude Code</strong> — it brings the skill and both hooks; nothing to edit by hand.
+						<div style={{ marginTop: 4 }}>
+							<Command label="In Claude Code, run" text={cmd.plugin} />
+						</div>
+					</Step>
+					<Step ok={cli.length > 0}>
+						<strong>3. Link it</strong> — Claude asks one question, creates the repository private if it's missing, and links this machine.
+						<div style={{ marginTop: 4 }}>
+							<Command label="Then say" text={cmd.ask} />
+						</div>
+					</Step>
+					<Step ok={!!proof}>
+						<strong>4. Test it</strong> — one sentence to Claude Code, then Check. Seeing it here proves every part: plugin, skill, repository, branch, token and
+						this browser's sync.
+						<div className="wp-stack-sm" style={{ marginTop: 4 }}>
+							<Command label="Say this in Claude Code" text={linkTestPhrase(device)} />
+							<span className="wp-row">
+								<button
+									className="wp-btn wp-btn-sm wp-btn-primary"
+									disabled={!linked || test.busy}
+									onClick={() =>
+										test.run(async () => {
+											await call('pollBridge', true)
+											await reload()
+											setChecked(true)
+										})
+									}
+								>
+									<Busy busy={test.busy} doing="Checking…">
+										Check
+									</Busy>
+								</button>
+								{proof ? (
+									<span className="wp-ok-text">
+										Passed — <code>{proof.device}</code> saved it {when(proof.at)}, and this browser read it back. Everything is linked.
+									</span>
+								) : checked ? (
+									<span className="wp-muted">
+										Not there yet. Once Claude says it's saved, press Check again — GitHub can take up to a minute. Still nothing? Run <code>wp-brain doctor</code> (below) on
+										that machine.
+									</span>
+								) : !linked ? (
+									<span className="wp-muted">Finish step 1 first.</span>
+								) : null}
+							</span>
+							{test.error && <span className="wp-error">{test.error}</span>}
+						</div>
+					</Step>
+					<Step ok={false}>
+						<strong>5. Optional: Jira tickets kept up to date</strong> — a separate plugin, no extension needed. Claude comments on and moves your tickets on a PR,
+						always asking first.
+						<div className="wp-stack-sm" style={{ marginTop: 4 }}>
+							<Command label="In Claude Code, run" text={JIRA_COMMANDS.plugin} />
+							<Command label="Then sign in: run this and pick atlassian" text={JIRA_COMMANDS.signIn} />
+							<Command label="In a repository with ticket keys (Claude also offers this by itself), say" text={JIRA_COMMANDS.setup} />
+							<a className="wp-link" href={JIRA_COMMANDS.guide} target="_blank" rel="noreferrer">
+								How it works →
+							</a>
+						</div>
+					</Step>
+				</ol>
+			</div>
+
 			{linked && (
 				<div className="wp-stack-sm">
-					<span className="wp-eyebrow">Link Claude Code on a machine</span>
-					<Command label="1. In Claude Code, install the plugin (it brings the skill and both hooks; nothing to edit by hand)" text={cmd.plugin} />
-					<Command label="2. Then tell Claude — it creates the repository if needed, links it, and shows the token steps" text={cmd.ask} />
 					<details className="wp-small">
 						<summary className="wp-link" style={{ cursor: 'pointer' }}>
 							Older Claude Code, a terminal line instead, or Windows

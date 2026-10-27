@@ -136,7 +136,12 @@ In Chrome, open WorkPulse → **Settings → Backup**:
 3. Paste the token (a token limited to one repository picks it by itself) and press **Back up now**. The first backup
    only runs when you press it.
 
-The branch is already `brain`, the same as Claude Code's, so there is nothing to set. Extensions set up before 1.6.0
+The branch is already `brain`, the same as Claude Code's, so there is nothing to set.
+
+**Already have a repository with your WorkPulse backup** (a new browser or machine)? Paste the token as above. If the
+repository already holds a backup, step 4 says so (how many learnings, tickets and days, and when) and offers
+**Restore it here** instead of *Back up now* (1.6.1). A backup from a fresh browser would otherwise write its empty
+copy over yours. The token and the Zoho connection are per browser; everything else comes from the repository. Extensions set up before 1.6.0
 keep the branch they had.
 
 The token is stored only in the extension. Never put it in a repository, an `.env` file, a chat, or a Brain entry.
@@ -147,6 +152,10 @@ A separate plugin, no extension needed: `/plugin install jira-ticket-update --ma
 then `/mcp` → atlassian → sign in. See [the explainer](jira-ticket-update-setup.md).
 
 ## 4. Check it
+
+**In the extension:** Settings → **Claude Code & the Brain** → *Set it up, step by step* → **4. Test it**. Copy the sentence,
+say it in Claude Code, and press **Check**. *Passed — cli-… saved it* means every part is linked.
+
 
 ```bash
 node ~/workpulse-extension/cli/wp-brain.mjs doctor
@@ -165,6 +174,7 @@ filled in with your repository.
 
 ## What changed
 
+- 2026-10-27 (1.6.1): a repository that already holds your backup is restored from, never written over by a fresh install.
 - 2026-10-27 (1.6.0): fewer steps. The extension and setup both default to the `brain` branch (the "Branch: set this
   first" step is gone), setup takes every recommended answer with one Enter, Claude asks one question instead of two,
   opening GitHub's repository form counts as making it, and the Zoho page says what's next once it's green.

@@ -1916,10 +1916,37 @@ export class DayCommands {
 	 * Writes the backup. Only the files whose contents changed are pushed, so a
 	 * quiet day does not leave a commit behind.
 	 */
-	async pushBackup(): Promise<{ pushed: number; skipped: number }> {
+	/**
+	 * A WorkPulse backup already in the chosen repository, branch and folder, which this browser has not
+	 * written or restored. A fresh install pointed at the repository you already use must not start by
+	 * writing its empty self over it, so the first backup checks and the Backup page offers Restore.
+	 */
+	async existingBackup(): Promise<{ exists: false } | { exists: true; exportedAt: number; counts: Manifest['counts'] }> {
+		const [s, rt] = await Promise.all([this.store.settings(), this.store.runtime()])
+		if (rt.sync?.target === syncTarget(s.syncRepo, s.syncBranch, s.syncPath)) return { exists: false }
+		const gh = await this.github()
+		const dir = (s.syncPath || 'workpulse').replace(/^\/+|\/+$/g, '')
+		const file = await gh.read(`${dir}/index.json`)
+		if (!file) return (await gh.read(`${dir}/backup.json`)) ? { exists: true, exportedAt: 0, counts: { days: 0, entries: 0, learnings: 0, tickets: 0 } } : { exists: false }
+		try {
+			const m = JSON.parse(file.text) as Partial<Manifest>
+			return { exists: true, exportedAt: m.exportedAt ?? 0, counts: { days: 0, entries: 0, learnings: 0, tickets: 0, ...m.counts } }
+		} catch {
+			return { exists: true, exportedAt: 0, counts: { days: 0, entries: 0, learnings: 0, tickets: 0 } }
+		}
+	}
+
+	async pushBackup(opts: { overwrite?: boolean } = {}): Promise<{ pushed: number; skipped: number }> {
 		const gh = await this.github()
 		const s = await this.store.settings()
 		const rt = await this.store.runtime()
+		if (!opts.overwrite) {
+			const there = await this.existingBackup()
+			if (there.exists) {
+				const what = there.counts.learnings || there.counts.tickets ? ` (${there.counts.learnings} learnings, ${there.counts.tickets} tickets)` : ''
+				throw new Error(`${s.syncRepo} already has a WorkPulse backup${what}. Restore it here first, or choose Back up over it.`)
+			}
+		}
 		const data = await this.backup()
 		// Recordings are fetched one at a time and only the kept ones: a handful
 		// of megabytes each, and no reason for the rest to pass through here.
@@ -1963,6 +1990,17 @@ export class DayCommands {
 	 * too.
 	 */
 	async restoreBackup(): Promise<{ learnings: number; tickets: number; days: number }> {
+		const s = await this.store.settings()
+		const target = syncTarget(s.syncRepo, s.syncBranch, s.syncPath)
+		const out = await this.readBackupIn()
+		// This browser now holds that backup, so its next one is an update of it rather than a stranger
+		// writing over it. No file hashes yet: the next backup writes every file once.
+		await this.store.updateRuntime((r) => void (r.sync = { ...r.sync, target, files: {}, at: r.sync?.target === target ? r.sync.at : undefined, error: undefined }))
+		this.env.ui.changed()
+		return out
+	}
+
+	private async readBackupIn(): Promise<{ learnings: number; tickets: number; days: number }> {
 		const gh = await this.github()
 		const dir = ((await this.store.settings()).syncPath || 'workpulse').replace(/^\/+|\/+$/g, '')
 

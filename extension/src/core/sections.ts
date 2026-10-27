@@ -34,6 +34,7 @@ export const SECTIONS: Section[] = [
 	{ hash: '#/settings/schedule', page: 'Settings', title: 'Schedule', detail: 'Shift times, workdays, how often you are asked', keywords: 'shift start end hours workdays interval prompt grace minimum' },
 	{ hash: '#/settings/chime', page: 'Settings', title: 'Alarms & nudges', detail: 'Chime, check-in and check-out alarms, break and end-of-day', keywords: 'sound chime ring alarm notification break stand up learned' },
 	{ hash: '#/settings/backup', page: 'Settings', title: 'Backup to GitHub', detail: 'Write your data to a repository you own, once a day', keywords: 'backup github repository token sync restore private local export' },
+	{ hash: '#/settings/claude', page: 'Settings', title: 'Claude Code & the Brain', detail: 'Install the plugin, link it, test the link; the Jira plugin', keywords: 'claude code plugin link connect test brain skill jira cli wp-brain' },
 	{ hash: '#/settings/prefix', page: 'Settings', title: 'Ticket prefixes', detail: 'PAY, LEAP, SALESPRO — what your keys start with', keywords: 'prefix ticket key jira right click menu detect' },
 	{ hash: '#/settings/keyboard', page: 'Settings', title: 'Keyboard', detail: 'The box on any page, and the shortcut that opens it', keywords: 'shortcut keyboard hotkey command palette spotlight quick capture cmd k' },
 	{ hash: '#/settings/block', page: 'Settings', title: 'Blocks you book in advance', detail: 'Deep work on the calendar rather than on willpower', keywords: 'deep work focus block book schedule recurring daily concentration calendar' },

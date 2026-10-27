@@ -40,6 +40,16 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 			.catch(() => setRepos([]))
 	}, [state?.hasToken, state?.repo, repos])
 
+	// The repository you already use, opened in a new browser, holds your backup: it is restored from,
+	// not written over by this browser's empty copy. Checked once the token and repository are known.
+	const [existing, setExisting] = useState<{ exists: boolean; exportedAt?: number; counts?: { days: number; learnings: number; tickets: number } } | null>(null)
+	useEffect(() => {
+		if (!state?.hasToken || !state.repo || state.at != null) return setExisting(null)
+		void call('existingBackup')
+			.then(setExisting)
+			.catch(() => setExisting(null))
+	}, [state?.hasToken, state?.repo, state?.branch, state?.path, state?.at])
+
 	if (!state) return <div className="wp-card wp-muted">Loading…</div>
 
 	const step: SetupStep = setupStep({ madeRepo, hasToken: state.hasToken, repo: state.repo, lastPushAt: state.at })
@@ -398,10 +408,57 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 								</li>
 							</ul>
 						</details>
+						{existing?.exists && (
+							<div className="wp-banner">
+								<span className="wp-grow wp-small">
+									<strong>{state.repo} already has your WorkPulse backup</strong>
+									{existing.counts && (existing.counts.learnings || existing.counts.tickets || existing.counts.days)
+										? ` — ${existing.counts.learnings} learnings, ${existing.counts.tickets} tickets, ${existing.counts.days} days`
+										: ''}
+									{existing.exportedAt ? `, written ${new Date(existing.exportedAt).toLocaleString()}` : ''}. Bring it into this browser first: a backup
+									now would write this browser's copy over it.
+								</span>
+							</div>
+						)}
 						<div className="wp-row">
-							<button className="wp-btn wp-btn-sm wp-btn-primary" disabled={busy || step !== 'backup'} onClick={backUpNow}>
-								<Busy busy={busy} doing="Backing up…">Back up now</Busy>
-							</button>
+							{existing?.exists ? (
+								<>
+									<ConfirmButton
+										className="wp-btn wp-btn-sm wp-btn-primary"
+										label="Restore it here"
+										question="This replaces the learnings, tickets, tasks and time logs in this browser with the ones in the repository."
+										confirmLabel="Restore"
+										disabled={busy}
+										onConfirm={() =>
+											run(async () => {
+												const r = await call('restoreBackup')
+												setExisting({ exists: false })
+												setSaid(`Restored ${r.learnings} learnings, ${r.tickets} tickets and ${r.days} days. Back up now to carry on from here.`)
+												await reload()
+											})
+										}
+									/>
+									<ConfirmButton
+										className="wp-btn wp-btn-sm wp-btn-ghost"
+										label="Back up over it"
+										question="This writes what this browser has over the backup in the repository. Earlier versions stay in its git history."
+										confirmLabel="Write over it"
+										disabled={busy}
+										onConfirm={() =>
+											run(async () => {
+												const r = await call('pushBackup', { overwrite: true })
+												setExisting({ exists: false })
+												setSaid(`Saved ${r.pushed} file${r.pushed === 1 ? '' : 's'} to ${state.repo}.`)
+												await reload()
+											})
+										}
+									/>
+								</>
+							) : (
+								<button className="wp-btn wp-btn-sm wp-btn-primary" disabled={busy || step !== 'backup'} onClick={backUpNow}>
+									<Busy busy={busy} doing="Backing up…">Back up now</Busy>
+								</button>
+							)}
 							{!!state.repo && (
 								<a className="wp-link wp-small" href={`https://github.com/${state.repo}`} target="_blank" rel="noreferrer">
 									Open the repository →

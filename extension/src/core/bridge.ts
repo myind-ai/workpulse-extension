@@ -353,6 +353,30 @@ export function devicesOf(entries: BridgeEntry[]): Device[] {
 	return [...by.values()].sort((a, b) => b.last - a.last)
 }
 
+/**
+ * The end-to-end link test: Claude Code saves a learning carrying this browser's code, and this browser
+ * reads it back. Seeing it proves every part at once — plugin, skill, CLI, repository, branch, token and
+ * this browser's sync. The code comes from this browser's own name, so it is the same on every visit and
+ * nothing has to be stored for it.
+ */
+export const linkTestCode = (device: string) => `wp-link-${device.replace(/^ext-/, '')}`
+export const linkTestPhrase = (device: string) => `Save it as a learning: WorkPulse link test ${linkTestCode(device)}`
+
+/** The newest entry a Claude Code machine wrote with this browser's link-test code in it, if any. */
+export function linkTestFound(entries: BridgeEntry[], device: string): BridgeEntry | null {
+	const code = linkTestCode(device).toLowerCase()
+	const hits = entries.filter((e) => e.device.startsWith('cli-') && `${e.title} ${e.subtitle ?? ''} ${e.body ?? ''}`.toLowerCase().includes(code))
+	return hits.sort((a, b) => b.at - a.at)[0] ?? null
+}
+
+/** The Jira ticket-update plugin: install, sign in, and the sentence that sets it up for a team. */
+export const JIRA_COMMANDS = {
+	plugin: '/plugin install jira-ticket-update --marketplace myind-ai/workpulse-extension',
+	signIn: '/mcp',
+	setup: 'set up jira ticket updates',
+	guide: 'https://github.com/myind-ai/workpulse-extension/blob/main/docs/guides/jira-ticket-update-setup.md',
+}
+
 /** Where the open-source CLI and skill live, for a machine that has neither yet. */
 export const SOURCE_REPO = 'https://github.com/myind-ai/workpulse-extension'
 

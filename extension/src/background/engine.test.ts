@@ -2571,6 +2571,66 @@ describe('changing where the backup goes', () => {
 	})
 })
 
+describe('a repository that already holds your backup', () => {
+	// A fresh install pointed at the repository you already use. Its first backup would otherwise write
+	// this browser's empty copy over the one in the repository.
+	const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64')
+	const manifest = { version: 2, exportedAt: Date.parse('2026-10-20T13:30:00Z'), counts: { days: 40, entries: 300, learnings: 3, tickets: 2 }, shards: { meta: 'workpulse/data/meta.json', days: [], learnings: [], tickets: [] } }
+	const github = (opts: { hasBackup: boolean }) => {
+		const commits: string[][] = []
+		vi.stubGlobal('fetch', (async (url: string, init?: RequestInit) => {
+			const u = String(url)
+			const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
+			if (u.includes('/contents/workpulse/index.json') && init?.method !== 'PUT') return opts.hasBackup ? reply({ content: b64(JSON.stringify(manifest)), sha: 'm' }) : reply({}, 404)
+			if (u.includes('/contents/workpulse/data/meta.json')) return reply({ content: b64('{}'), sha: 'x' })
+			if (u.includes('/contents/')) return reply({}, 404)
+			if (u.endsWith('/git/ref/heads/main')) return reply({ object: { sha: 'head' } })
+			if (u.includes('/git/commits/head')) return reply({ tree: { sha: 'tree' } })
+			if (u.endsWith('/git/trees')) {
+				commits.push(JSON.parse(String(init!.body)).tree.map((t: { path: string }) => t.path))
+				return reply({ sha: 'new-tree' })
+			}
+			if (u.endsWith('/git/commits')) return reply({ sha: 'new-commit' })
+			if (u.includes('/git/refs/heads/main')) return reply({})
+			return reply({ full_name: 'me/notes', private: true, permissions: { push: true }, default_branch: 'main' })
+		}) as unknown as typeof fetch)
+		return commits
+	}
+	beforeEach(async () => {
+		await cmd.saveSettings({ syncRepo: 'me/notes', syncPath: 'workpulse', syncBranch: '' })
+		await cmd.saveSyncToken('tok')
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	it('should say what is there, and refuse to write this browser over it', async () => {
+		const commits = github({ hasBackup: true })
+		expect(await cmd.existingBackup()).toEqual({ exists: true, exportedAt: manifest.exportedAt, counts: manifest.counts })
+		await expect(cmd.pushBackup()).rejects.toThrow(/me\/notes already has a WorkPulse backup \(3 learnings, 2 tickets\)\. Restore it here first/)
+		expect(commits).toEqual([])
+	})
+
+	it('should write over it only when asked to', async () => {
+		const commits = github({ hasBackup: true })
+		await cmd.pushBackup({ overwrite: true })
+		expect(commits).toHaveLength(1)
+	})
+
+	it('should back up normally once it has been restored here', async () => {
+		const commits = github({ hasBackup: true })
+		await cmd.restoreBackup()
+		expect(await cmd.existingBackup()).toEqual({ exists: false })
+		await cmd.pushBackup()
+		expect(commits).toHaveLength(1)
+	})
+
+	it('should not get in the way of a repository with no backup in it', async () => {
+		const commits = github({ hasBackup: false })
+		expect(await cmd.existingBackup()).toEqual({ exists: false })
+		await cmd.pushBackup()
+		expect(commits).toHaveLength(1)
+	})
+})
+
 describe('a day of hourly logs, cut into timesheet rows', () => {
 	it('should give each row the hour it belongs to, not a copy of the whole day', async () => {
 		at('2026-10-13T09:00:00')
