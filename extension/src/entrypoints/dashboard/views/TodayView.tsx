@@ -10,6 +10,7 @@ import { Recover } from '@/ui/Recover'
 
 import { Briefing } from './Briefing'
 import { Ready } from './Ready'
+import { Resume } from './Resume'
 import { DayShape, Goals } from './Goals'
 import { Standup } from './Standup'
 import { Support } from './Support'
@@ -158,6 +159,9 @@ export function TodayView() {
 
 			{/* The morning, which takes itself off the page by lunchtime. */}
 			<Briefing />
+
+			{/* The next action written when work stopped, per ticket. */}
+			<Resume />
 
 			{/* What is finished and waiting on somebody else. Compact here — the
 			    whole picture is on Your record. */}

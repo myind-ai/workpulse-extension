@@ -8,6 +8,7 @@
 //   bridge/entries/<YYYY-MM>/<device>.jsonl   what was asked, done, learned, broken
 //   bridge/inbox/to-cli/*.json                requests from the extension
 //   bridge/inbox/acks/<device>/<id>.json      this side saying "picked that up"
+//   bridge/records/<device>/<YYYY-MM>/*.md     a readable copy of each entry this device wrote
 //
 // The format code is the extension's own (extension/src/core/bridge.ts), loaded
 // directly — Node 22.18+ strips TypeScript types itself — so the two sides can
@@ -17,11 +18,14 @@
 //   wp-brain setup        asks repo (created private if missing), branch, device, hooks, rule, skill — then installs them (start here)
 //   wp-brain doctor       checks every part of the link
 //   wp-brain init owner/repo [--branch NAME] [--create] [--steps] [--clone DIR] [--device NAME]
-//   wp-brain add <kind> "title" [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
+//   wp-brain add <kind> "title" [--subtitle TEXT] [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
 //   wp-brain brief [TICKET] [--project P]   what to know before starting
 //   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N]
+//   wp-brain search "words" [--limit N]     ranked similar context across every saved record
+//   wp-brain index [--no-push]              add any missing records of this device; write INDEX.md and graph.json
+//                                           next to the clone (built from every device, never committed)
 //   wp-brain report [--days 7] [--scope S]
 //   wp-brain inbox [--ack ID]
 //   wp-brain hook [--plugin]       (Claude Code SessionStart hook: the brief for this branch, as context;
@@ -44,6 +48,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	process.exit(1)
 })
 const { KINDS, ROOT, appendLine, entriesPath, filter, fold, newEntry, reportMarkdown, secretsIn, summarise } = bridge
+const { brainIndex, brainRecord, searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
 const { doctor, ensureRepo, extensionSteps, nudgeText, settingsHasHook, setup } = await import(join(here, 'setup.mjs'))
 
 const CONFIG = process.env.WP_BRAIN_CONFIG || join(homedir(), '.config', 'workpulse', 'brain.json')
@@ -181,6 +186,17 @@ function die(msg) {
 const day = (t) => new Date(t).toISOString().slice(0, 10)
 const short = (e) => `${day(e.at)}  ${e.kind.padEnd(8)} ${e.scope === 'personal' ? '[personal] ' : ''}${e.ticket ? e.ticket + ' ' : ''}${e.project ? '(' + e.project + ') ' : ''}${e.title}`
 
+/** An entry's readable record, written once, by the device that wrote the entry. */
+function writeRecord(cfg, entry) {
+	const { path, content } = brainRecord(entry)
+	mkdirSync(dirname(join(cfg.clone, path)), { recursive: true })
+	writeFileSync(join(cfg.clone, path), content)
+	return path
+}
+
+/** Where `wp-brain index` puts what is built from every device: beside the clone, never in it. */
+const viewDir = (cfg) => `${cfg.clone.replace(/\/+$/, '')}-index`
+
 // ── commands ────────────────────────────────────────────────────────────────
 
 const SCHEMA_DOC = `# bridge/
@@ -193,12 +209,14 @@ Every file has exactly one writer — a device — so nothing ever conflicts.
 | \`entries/<YYYY-MM>/<device>.jsonl\` | that device | One entry per line (\`workpulse.bridge.entry/1\`) |
 | \`inbox/to-cli/<ts>-<id>.json\` | the extension | A request for the CLI |
 | \`inbox/acks/<device>/<id>.json\` | the CLI device | "Picked that up" |
+| \`records/<device>/<YYYY-MM>/*.md\` | that device | A readable copy of each entry, written once |
 
 Entry kinds: ${KINDS.join(', ')}. Scope: \`work\` or \`personal\`.
-Fields: id, at (epoch ms), device, kind, scope, title, body (Markdown), ticket, project, tags,
+Fields: id, at (epoch ms), device, kind, scope, title, subtitle, body (Markdown), ticket, project, tags,
 asked, done, rootCause, status, next[], links { pr, commits[], related[], urls[] }.
 
-The extension's backup folder (\`workpulse/\`) is never written from here.
+The extension's backup folder (\`workpulse/\`) is never written from here. The index and graph are
+built on read (\`wp-brain index\`, the extension's Brain page), so no file is shared between writers.
 `
 
 const commands = {
@@ -271,6 +289,7 @@ const commands = {
 				{
 					kind,
 					title: words.join(' '),
+					subtitle: typeof opt.subtitle === 'string' ? opt.subtitle : undefined,
 					scope: opt.scope === 'personal' ? 'personal' : 'work',
 					body,
 					ticket: opt.ticket ? String(opt.ticket).toUpperCase() : undefined,
@@ -298,6 +317,7 @@ const commands = {
 			mkdirSync(dirname(abs), { recursive: true })
 			writeFileSync(abs, appendLine(existsSync(abs) ? readFileSync(abs, 'utf8') : null, entry))
 			written.add(rel)
+			written.add(writeRecord(cfg, entry))
 			console.log(`+ ${short(entry)}`)
 		}
 		const first = inputs[0]
@@ -394,6 +414,39 @@ const commands = {
 		const got = filter(readAll(cfg), { kind: opt.kind, scope: opt.scope, ticket: opt.ticket?.toUpperCase(), project: opt.project, query: opt.query })
 		for (const e of got.slice(0, Number(opt.limit) || 30)) console.log(short(e))
 		if (!got.length) console.log('Nothing matches.')
+	},
+
+	search({ pos, opt }) {
+		const query = pos.join(' ').trim()
+		if (!query) die('Usage: wp-brain search "words" [--limit N]')
+		const cfg = config()
+		pull(cfg)
+		const got = searchBrain(readAll(cfg), query)
+		for (const { e, score } of got.slice(0, Number(opt.limit) || 20)) {
+			console.log('[' + score + '] ' + short(e))
+			if (e.subtitle) console.log('    ' + e.subtitle)
+			if (e.next?.length) console.log('    next: ' + e.next.join(' · '))
+		}
+		if (!got.length) console.log('Nothing similar yet. Save a specific title, subtitle, tags, and next action first.')
+	},
+
+	index({ opt }) {
+		const cfg = config()
+		pull(cfg)
+		const all = readAll(cfg)
+		// Only this device's records: every file keeps its one writer.
+		const missing = all.filter((e) => e.device === cfg.device && !existsSync(join(cfg.clone, brainRecord(e).path)))
+		const paths = missing.map((e) => writeRecord(cfg, e))
+		if (paths.length) {
+			const pushed = commitAndPush(cfg, paths, `bridge: ${paths.length} readable records`, !opt['no-push'])
+			console.log(`${paths.length} record${paths.length === 1 ? '' : 's'} added${pushed && !opt['no-push'] ? ' and pushed' : ' locally'}.`)
+		}
+		const { index, graph } = brainIndex(all)
+		const dir = viewDir(cfg)
+		mkdirSync(dir, { recursive: true })
+		writeFileSync(join(dir, 'INDEX.md'), index.replaceAll('](records/', `](${join(cfg.clone, ROOT, 'records')}/`))
+		writeFileSync(join(dir, 'graph.json'), graph)
+		console.log(`${all.length} entries → ${join(dir, 'INDEX.md')} and graph.json (built from every device; not committed).`)
 	},
 
 	report({ opt }) {

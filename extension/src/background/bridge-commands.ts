@@ -9,6 +9,7 @@
 // browser writes, so nothing anybody else wrote can be overwritten.
 
 import { appendLine, changedFiles, devicesOf, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type Device, type InboxMessage, type Summary } from '@/core/bridge'
+import { brainRecord, openWork, type OpenWork } from '@/core/brain-index'
 import { enabled } from '@/core/features'
 import { parseRepo } from '@/core/sync'
 import { GitHub } from '@/lib/github'
@@ -30,6 +31,22 @@ export interface BridgeView {
 	error?: string
 	entries: BridgeEntry[]
 	summary: Summary
+	/** Saved here, waiting for a repository or the network. */
+	queued: number
+	/** Where to pick up: the newest next action per ticket, last 30 days. */
+	open: OpenWork[]
+}
+
+const KEY = /\b([A-Z][A-Z0-9]{1,9})-(\d{1,6})\b/
+
+/** What the Save context sheet sends. */
+export interface ContextInput {
+	title: string
+	subtitle?: string
+	kind?: BridgeEntry['kind']
+	next?: string
+	ticket?: string
+	page?: { title: string; url: string }
 }
 
 export class BridgeCommands extends PageCommands {
@@ -52,7 +69,10 @@ export class BridgeCommands extends PageCommands {
 	/** Everything the Brain page shows, from what is already here — no network. */
 	async bridge(): Promise<BridgeView> {
 		const [s, token, rt, device] = await Promise.all([this.store.settings(), this.store.syncToken(), this.store.runtime(), this.device()])
-		const entries = fold(rt.bridge?.files ?? {})
+		const queue = rt.bridge?.queue ?? []
+		const live = fold(rt.bridge?.files ?? {})
+		const seen = new Set(live.map((e) => e.id))
+		const entries = [...queue.filter((e) => !seen.has(e.id)), ...live].sort((a, b) => b.at - a.at)
 		return {
 			on: enabled('BRIDGE_SYNC'),
 			ready: !!parseRepo(s.syncRepo) && !!token,
@@ -65,6 +85,8 @@ export class BridgeCommands extends PageCommands {
 			error: rt.bridge?.error,
 			entries,
 			summary: summarise(entries),
+			queued: queue.length,
+			open: openWork(entries, this.now() - 30 * 86_400_000),
 		}
 	}
 
@@ -77,6 +99,7 @@ export class BridgeCommands extends PageCommands {
 		if (!enabled('BRIDGE_SYNC')) return { changed: 0, at: now }
 		const gh = await this.bridgeGithub()
 		if (!gh) return { changed: 0, at: now }
+		await this.flushQueue(gh).catch(() => undefined)
 		const rt = await this.store.runtime()
 		try {
 			const tree = await gh.treeIfChanged(force ? undefined : rt.bridge?.etag)
@@ -101,23 +124,85 @@ export class BridgeCommands extends PageCommands {
 		}
 	}
 
-	/** One entry from this browser, appended to this browser's own file. */
-	async bridgeAdd(input: Omit<BridgeEntry, 'schema' | 'id' | 'at' | 'device' | 'tags'> & { tags?: string[] }): Promise<BridgeEntry> {
-		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')
-		if (input.scope === 'personal' && !enabled('PERSONAL')) throw new Error('Personal entries are switched off in this build (WXT_FEATURE_PERSONAL).')
-		const gh = await this.bridgeGithub()
-		if (!gh) throw new Error('Set up the backup first: a repository and a token, in Settings → Backup.')
-		const [device, now] = [await this.device(), this.now()]
-		const entry = newEntry(input, device, now)
-		const path = entriesPath(now, device)
-		const existing = await gh.read(path)
-		const text = appendLine(existing?.text ?? null, entry)
-		await gh.commit([{ path, content: text }], `bridge: ${entry.kind} — ${entry.title.slice(0, 60)}`)
+	/**
+	 * Entries from this browser, in one commit: each appended to this browser's
+	 * own file for its month, plus its own readable record. Nothing another
+	 * device wrote is touched, and nothing derived from everyone is committed.
+	 */
+	private async send(gh: GitHub, entries: BridgeEntry[]): Promise<void> {
+		if (!entries.length) return
+		const texts: Record<string, string> = {}
+		for (const entry of entries) {
+			const path = entriesPath(entry.at, entry.device)
+			texts[path] = appendLine(texts[path] ?? (await gh.read(path))?.text ?? null, entry)
+		}
+		const first = entries[0]
+		const message = entries.length === 1 ? `bridge: ${first.kind} — ${first.title.slice(0, 60)}` : `bridge: ${entries.length} entries`
+		await gh.commit([...Object.entries(texts).map(([path, content]) => ({ path, content })), ...entries.map(brainRecord)], message)
+		const sent = new Set(entries.map((e) => e.id))
 		// What was written is what is known: show it now, rather than after the
 		// next poll. The ETag goes, so that poll does look.
-		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, files: { ...r.bridge?.files, [path]: text }, etag: undefined }))
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, files: { ...r.bridge?.files, ...texts }, queue: (r.bridge?.queue ?? []).filter((e) => !sent.has(e.id)), etag: undefined }))
 		this.env.ui.changed()
-		return entry
+	}
+
+	/** Kept here until it can be sent: no repository yet, or no network. */
+	private async enqueue(entry: BridgeEntry, why?: string): Promise<void> {
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, queue: [...(r.bridge?.queue ?? []).filter((e) => e.id !== entry.id), entry], ...(why ? { error: why } : {}) }))
+		this.env.ui.changed()
+	}
+
+	/** Whatever was saved offline, sent now. */
+	private async flushQueue(gh: GitHub): Promise<number> {
+		const queue = (await this.store.runtime()).bridge?.queue ?? []
+		if (!queue.length) return 0
+		await this.send(gh, queue)
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, error: undefined }))
+		return queue.length
+	}
+
+	/**
+	 * One entry from this browser. Saving never waits on being connected: with
+	 * no repository yet, or no network, it is kept here and sent on the next sync.
+	 */
+	async bridgeAdd(input: Omit<BridgeEntry, 'schema' | 'id' | 'at' | 'device' | 'tags'> & { tags?: string[] }): Promise<BridgeEntry & { queued?: boolean }> {
+		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')
+		if (input.scope === 'personal' && !enabled('PERSONAL')) throw new Error('Personal entries are switched off in this build (WXT_FEATURE_PERSONAL).')
+		const entry = newEntry(input, await this.device(), this.now())
+		const gh = await this.bridgeGithub()
+		if (!gh) {
+			await this.enqueue(entry)
+			return { ...entry, queued: true }
+		}
+		try {
+			await this.send(gh, [...((await this.store.runtime()).bridge?.queue ?? []), entry])
+			return entry
+		} catch (e) {
+			await this.enqueue(entry, `Saved in this browser; not sent yet (${(e as Error).message}). It goes on the next sync.`)
+			return { ...entry, queued: true }
+		}
+	}
+
+	/**
+	 * Save context: what you are doing, why, and what comes next, from any page.
+	 * The ticket comes from the words or the page when it is not given, and the
+	 * page itself goes in as a link.
+	 */
+	async saveContext(input: ContextInput): Promise<BridgeEntry & { queued?: boolean }> {
+		const title = input.title.trim()
+		if (title.length < 2) throw new Error('Give it a title first.')
+		const ticket = (input.ticket || title.match(KEY)?.[0] || input.page?.title.match(KEY)?.[0] || input.page?.url.match(KEY)?.[0])?.toUpperCase()
+		const url = input.page?.url && /^https?:\/\//.test(input.page.url) ? input.page.url : undefined
+		return this.bridgeAdd({
+			kind: input.kind ?? 'note',
+			scope: 'work',
+			title: title.slice(0, 200),
+			subtitle: input.subtitle?.trim() || undefined,
+			ticket,
+			status: input.next?.trim() ? 'in progress' : undefined,
+			next: input.next?.trim() ? [input.next.trim()] : undefined,
+			links: url ? { urls: [url] } : undefined,
+		})
 	}
 
 	/**
@@ -180,12 +265,7 @@ export class BridgeCommands extends PageCommands {
 		} catch {
 			return // shaped like a secret: it stays on this machine
 		}
-		const path = entriesPath(now, device)
-		const existing = await gh.read(path)
-		const text = appendLine(existing?.text ?? null, entry)
-		await gh.commit([{ path, content: text }], `bridge: ${entry.kind} — ${entry.title.slice(0, 60)}`)
-		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, files: { ...r.bridge?.files, [path]: text }, etag: undefined }))
-		this.env.ui.changed()
+		await this.send(gh, [entry])
 	}
 
 	/** Ask whatever reads the inbox — the CLI skill — to do something. */

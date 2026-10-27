@@ -60,3 +60,11 @@ describe('tab groups, from the box', () => {
 		expect(MODES.map((m) => m.id)).toContain('group')
 	})
 })
+
+describe('save context mode', () => {
+	it('is reached with + and needs words', () => {
+		expect(modeFor('+ retry fix half done', 'go')).toEqual({ mode: 'brain', text: 'retry fix half done' })
+		expect(canSubmit('brain', 'x', false)).toBe(false)
+		expect(canSubmit('brain', 'retry fix', false)).toBe(true)
+	})
+})

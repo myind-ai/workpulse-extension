@@ -439,6 +439,7 @@
 }
 .wp-pal-input:focus { outline: none; }
 .wp-pal-input::placeholder { color: var(--wp-faint); }
+.wp-pal-next { font-size: 14px; padding: 8px 16px 12px; border-top: 1px dashed var(--wp-border); }
 .wp-pal-list { max-height: 44vh; overflow-y: auto; border-top: 1px solid var(--wp-border); padding: 5px; }
 .wp-pal-chips {
 	display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

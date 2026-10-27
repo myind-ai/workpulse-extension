@@ -56,3 +56,14 @@ describe('where did I write that down', () => {
 		expect(countKinds(findAll('division', hay))[0].count).toBeGreaterThan(0)
 	})
 })
+
+describe('brain entries in the one search', () => {
+	it('finds a Brain entry by its root cause and opens its ticket', () => {
+		const hits = findAll('idempotency', {
+			entries: [], notes: [], learnings: [], tickets: [], links: [], tasks: [],
+			brain: [{ id: 'e1', title: 'Webhook retry fails', kind: 'Debugging', ticket: 'PAY-2433', more: 'old idempotency key reused', at: 1 }],
+		})
+		expect(hits).toHaveLength(1)
+		expect(hits[0]).toMatchObject({ kind: 'brain', text: 'Webhook retry fails', where: 'Debugging · PAY-2433', hash: '#/brain/PAY-2433' })
+	})
+})

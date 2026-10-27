@@ -1,6 +1,7 @@
 // Shared data model. Mirrors the desktop app's SQLite tables (src-tauri/src/db.rs)
 // so the phase 3 bridge can sync records by `uid`. Instants are epoch ms.
 
+import type { BridgeEntry } from './bridge'
 import type { NudgeKind } from './health'
 import type { Tier } from './licence'
 
@@ -402,7 +403,16 @@ export interface Runtime {
 	 * unchanged repository costs a free 304), the sha of every entry file, their
 	 * contents, and this browser's name as a writer there.
 	 */
-	bridge?: { device?: string; etag?: string; polledAt?: number; shas?: Record<string, string>; files?: Record<string, string>; error?: string }
+	bridge?: {
+		device?: string
+		etag?: string
+		polledAt?: number
+		shas?: Record<string, string>
+		files?: Record<string, string>
+		error?: string
+		/** Entries saved while there was no repository or no network, sent on the next sync. */
+		queue?: BridgeEntry[]
+	}
 	/** A recording in progress: what it is of, and when it stops itself. */
 	clip?: { startedAt: number; seconds: number; url?: string; title?: string }
 	/** The last thing that could be put back, and the record as it was. */

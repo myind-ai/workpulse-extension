@@ -3,6 +3,7 @@
 //
 //   bridge/entries/<YYYY-MM>/<device>.jsonl   one entry per line, append-only
 //   bridge/inbox/to-cli/<ts>-<id>.json        a request from the extension
+//   bridge/records/<device>/<YYYY-MM>/….md     a readable copy of each entry (brain-index.ts)
 //
 // Every file has exactly one writer — a device — so two machines never edit the
 // same file and there is nothing to merge. The backup's own folder (`workpulse/`
@@ -15,7 +16,7 @@
 
 export const SCHEMA = 'workpulse.bridge.entry/1'
 
-export const KINDS = ['ticket', 'learning', 'mistake', 'debug', 'report', 'code', 'skill', 'note'] as const
+export const KINDS = ['ticket', 'learning', 'mistake', 'debug', 'decision', 'handover', 'report', 'code', 'skill', 'note'] as const
 export type EntryKind = (typeof KINDS)[number]
 
 export const KIND_LABEL: Record<EntryKind, string> = {
@@ -23,6 +24,8 @@ export const KIND_LABEL: Record<EntryKind, string> = {
 	learning: 'Learning',
 	mistake: 'Mistake',
 	debug: 'Debugging',
+	decision: 'Decision',
+	handover: 'Handover',
 	report: 'Report',
 	code: 'Code',
 	skill: 'Skill',
@@ -40,6 +43,8 @@ export interface BridgeEntry {
 	kind: EntryKind
 	scope: Scope
 	title: string
+	/** A one-line description shown beneath the title in search and Markdown records. */
+	subtitle?: string
 	/** Markdown. */
 	body?: string
 	/** PAY-2433, when it belongs to one. */

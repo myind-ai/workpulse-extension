@@ -29,7 +29,7 @@ Use whichever of these is available:
 | Way | How |
 |---|---|
 | Chrome Web Store | *(not yet listed; this guide gets updated once it is)* |
-| Release zip | Download `workpulse-extension-1.1.2-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick the unzipped folder |
+| Release zip | Download `workpulse-extension-1.2.0-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick the unzipped folder |
 | From source | `git clone https://github.com/myind-ai/workpulse-extension && cd workpulse-extension/extension && npm install && npm run build`, then load `extension/.output/chrome-mv3` the same way |
 
 ## 2. Connect Claude Code

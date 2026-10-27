@@ -8,6 +8,8 @@ description: Keep a running memory of every ticket, bug, debugging session, repo
 One private GitHub repository holds a `bridge/` folder that both the WorkPulse extension (Brain page) and this skill read and write.
 Each device writes only its own file, so nothing conflicts. The tool is `wp-brain` (`cli/wp-brain.mjs` in the WorkPulse repo, Node ≥ 22.18).
 
+Every entry also gets a readable Markdown record under `bridge/records/<device>/YYYY-MM/`, written once by the device that wrote the entry (so every file keeps one writer). Its filename comes from the ticket and title; its front matter carries subtitle, type, scope, device, tags, status and links; its body uses headings such as **Summary**, **Done**, **Root cause**, and **Next action**. JSONL remains the sync source. Entry kinds include `decision` and `handover` as well as ticket, learning, mistake, debug, report, code, skill, note.
+
 ```bash
 WP="${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs"                        # installed as a Claude Code plugin
 [ -f "$WP" ] || WP="${WP_CLI:-$HOME/workpulse-extension/cli/wp-brain.mjs}"   # installed by install.sh (or set WP_CLI)
@@ -83,6 +85,8 @@ It shows earlier entries for that ticket and its related ones, the mistakes that
 open follow-ups, and requests the user sent from the extension's inbox. Say in one line what you are taking from it.
 If an inbox item is handled, acknowledge it: `node $WP inbox --ack <id>`.
 
+For personal productivity work, use `--scope personal --project <name>` and read the matching brief before planning. Preserve a concrete **next** step whenever work remains open; it is the resume point for the next session.
+
 ## While working
 
 Record the moment it happens, not at the end, when one of these occurs:
@@ -90,7 +94,7 @@ Record the moment it happens, not at the end, when one of these occurs:
 | It happened | Command |
 |---|---|
 | A wrong assumption or a fix that did not work | `node $WP add mistake "what went wrong #tag" --ticket K --root-cause "why"` |
-| A bug was diagnosed | `node $WP add debug "symptom" --ticket K --root-cause "cause" --body "fix and the command that proved it"` |
+| A bug was diagnosed | `node $WP add debug "symptom" --subtitle "one-line impact" --ticket K --root-cause "cause" --body "fix and the command that proved it"` |
 | Something reusable was learned | `node $WP add learning "the lesson #tag"` |
 | A new skill/tool was set up | `node $WP add skill "what, and where the notes are"` |
 
@@ -117,7 +121,8 @@ JSON
 Rules:
 
 - **Honest status**: `done` only if verified (tests, build, live check). Otherwise `in progress` or `blocked`, with `next`.
-- **Short and specific**: titles are one line; the body holds commands, error text and the fix.
+- **Short and specific**: titles are one line; `--subtitle` says why it matters; the body holds commands, error text and the fix.
+- **Always leave a resume point**: for unfinished work, set `--status "in progress" --next "the next concrete action"`. Claude must read that next action before continuing the same ticket or project.
 - **Never secrets**: the tool refuses anything token-shaped, but also leave out customer data, passwords and full logs.
 - Pushing to this private notes repo is the skill's purpose; it is the one push that needs no extra ask once the user has run `init`.
 
@@ -127,7 +132,17 @@ Rules:
 node $WP report --days 7               # week, Markdown on stdout
 node $WP report --days 30 --scope personal
 node $WP list --kind mistake --query forms
+node $WP search "idempotency retry"    # ranked title/tag/body matches, with next actions
+node $WP index                         # add this device's missing records; write INDEX.md + graph.json beside the clone
 ```
+
+Every `add` commits only the entry line and its own record. `INDEX.md` (open
+next actions, recent records) and `graph.json` are built from every device on
+read and never committed: `wp-brain index` writes them to `<clone>-index/`, and
+the extension builds them in memory. The graph chains records that share a
+ticket, project or tag. Search is lexical and
+evidence-based today: it ranks title, subtitle, tags, and body matches; it does
+not claim semantic similarity that has not been verified.
 
 ## Gotchas
 

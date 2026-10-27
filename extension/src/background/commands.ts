@@ -38,6 +38,7 @@ import { hoursFor } from '@/core/leave'
 import { overtime, overtimeLine, type Overtime, type WorkedDay } from '@/core/overtime'
 import { periodReport, periodText, spanFrom, type PeriodReport, type Span } from '@/core/period'
 import { countKinds, findAll, type Hit, type HitKind } from '@/core/find'
+import { fold, KIND_LABEL as BRAIN_KIND } from '@/core/bridge'
 import { isComplete, lastDays, lockLine, owedDays, streakOf, type DayState, type Owed, type Streak } from '@/core/habit'
 import { leftAt, regularisationNote } from '@/core/closeout'
 import { describeAdd, shortTicket, undoLabel, undoOffered, type Undoable } from '@/core/undo'
@@ -3415,7 +3416,8 @@ export class DayCommands {
 		if (query.trim().length < 2) return { hits: [], kinds: [] }
 		const today = istDate(this.now())
 		const from = addDays(today, -days)
-		const [tickets, tasks, learnings] = await Promise.all([this.store.workspaces(), this.store.tasks(), this.store.learnings()])
+		const [tickets, tasks, learnings, rt] = await Promise.all([this.store.workspaces(), this.store.tasks(), this.store.learnings(), this.store.runtime()])
+		const brain = [...(rt.bridge?.queue ?? []), ...fold(rt.bridge?.files ?? {})]
 		const entries: { date: string; text: string; slotStart: number }[] = []
 		for (let d = from; d <= today; d = addDays(d, 1)) {
 			for (const e of await this.store.entries(d)) entries.push({ date: d, text: e.text, slotStart: e.slotStart })
@@ -3427,6 +3429,7 @@ export class DayCommands {
 			tickets: tickets.map((w) => ({ id: w.id, name: w.name, at: w.updatedAt ?? w.at })),
 			links: tickets.flatMap((w) => w.tabs.map((t) => ({ ticketId: w.id, ticketName: w.name, title: t.title, url: t.url, note: t.note, addedAt: t.addedAt }))),
 			tasks: tasks.map((t) => ({ uid: t.uid, title: t.title, key: t.key, status: t.status, createdAt: t.createdAt })),
+			brain: [...new Map(brain.map((e) => [e.id, e])).values()].map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: BRAIN_KIND[e.kind] ?? e.kind, ticket: e.ticket, at: e.at, more: [e.body, e.asked, e.done, e.rootCause, e.project, ...(e.tags ?? []), ...(e.next ?? [])].filter(Boolean).join(' ') })),
 		})
 		return { hits, kinds: countKinds(hits) }
 	}

@@ -38,6 +38,8 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 	// What each mode needs beyond words. Kept to chips, because a box that is
 	// meant to take three seconds cannot grow a form.
 	const [kind, setKind] = useState<'learning' | 'mistake'>('learning')
+	const [ctxKind, setCtxKind] = useState<'note' | 'decision' | 'debug' | 'handover'>('note')
+	const [nextStep, setNextStep] = useState('')
 	const [when, setWhen] = useState<'' | 'today' | 'tomorrow'>('')
 	const [high, setHigh] = useState(false)
 	// The picture is taken for you, not asked about: the moment you are writing
@@ -231,6 +233,10 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 			} else if (mode === 'learn') {
 				await call('saveLearning', { text: body, kind })
 				setSaid(kind === 'mistake' ? 'Saved — you will be told if it comes up again' : 'Saved to your learnings')
+			} else if (mode === 'brain') {
+				const saved = await call('saveContext', { title: body, kind: ctxKind, next: nextStep.trim() || undefined, page })
+				setNextStep('')
+				setSaid(saved.queued ? 'Saved here — it goes to the Brain on the next sync' : `Saved to the Brain${saved.ticket ? ` under ${saved.ticket}` : ''}`)
 			} else if (mode === 'page') {
 				if (!page) throw new Error('No page here to note.')
 				// The screenshot has to be taken by the background: a page cannot
@@ -386,6 +392,40 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 							Would not repeat
 						</button>
 					</div>
+				)}
+
+				{mode === 'brain' && (
+					<>
+						<div className="wp-pal-chips">
+							{([['note', 'Note'], ['decision', 'Decision'], ['debug', 'Debugging'], ['handover', 'Handover']] as const).map(([k, label]) => (
+								<button key={k} className={ctxKind === k ? 'wp-chip wp-chip-accent' : 'wp-chip'} onClick={() => setCtxKind(k)}>
+									{label}
+								</button>
+							))}
+							{page && (
+								<span className="wp-pal-slot" title={page.url}>
+									with {page.title.slice(0, 40)}
+								</span>
+							)}
+						</div>
+						{/* The one line that makes it resumable. Optional, because a
+						    title alone is still worth keeping. */}
+						<input
+							className="wp-pal-input wp-pal-next"
+							placeholder="Next action (optional): what to do first when you come back"
+							value={nextStep}
+							onChange={(e) => setNextStep(e.target.value)}
+							onKeyDown={(e) => {
+								e.stopPropagation()
+								if (e.key === 'Escape') return onClose()
+								if (e.key === 'Enter' && ready) {
+									e.preventDefault()
+									void submit()
+								}
+							}}
+							aria-label="Next action"
+						/>
+					</>
 				)}
 
 				{mode === 'task' && (

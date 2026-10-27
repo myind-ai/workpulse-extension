@@ -38,6 +38,7 @@ const walk = (dir, rel) => {
 	}
 }
 if (!REAL && existsSync(join(CLONE, 'bridge'))) walk(join(CLONE, 'bridge'), 'bridge')
+const seeded = new Set(Object.keys(files))
 const sha = (s) => {
 	let h = 0
 	for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0
@@ -197,6 +198,29 @@ const main = async () => {
 			console.log(`new ticket opened at ${new URL(page.url()).hash}`)
 		} else console.log('no "+ new ticket" button found')
 
+		// Save context from the palette (+), then Today's Resume card and the one search.
+		await page.goto(ext('dashboard.html#/today'))
+		await page.waitForTimeout(1000)
+		await page.getByText('Quick actions').click()
+		const box = page.locator('.wp-pal-input').first()
+		await box.fill('+PAY-2433 retry fix half done, staging still fails')
+		await page.getByRole('button', { name: 'Debugging', exact: true }).click()
+		await page.getByLabel('Next action').fill('Run the two-retry test on staging')
+		await shot('13-palette-save-context')
+		await page.getByLabel('Next action').press('Enter')
+		await page.waitForTimeout(2500)
+		await page.goto(ext('dashboard.html#/today'))
+		await page.waitForTimeout(1500)
+		const resume = page.locator('section', { hasText: 'Pick up where you left off' })
+		console.log(`resume card shows the new next action: ${(await resume.textContent())?.includes('Run the two-retry test on staging') ? 'yes' : 'NO'}`)
+		await resume.screenshot({ path: join(OUT, '14-today-resume.png') })
+		await page.getByText('Quick actions').click()
+		await page.locator('.wp-pal-input').first().fill('staging still fails')
+		await page.waitForTimeout(1200)
+		console.log(`palette search finds the Brain entry: ${(await page.locator('.wp-pal-list').textContent())?.includes('Brain') ? 'yes' : 'NO'}`)
+		await shot('15-palette-finds-brain')
+		await page.keyboard.press('Escape')
+
 		// Settings → Claude Code & the Brain: the link, step by step, and the commands.
 		await page.goto(ext('dashboard.html#/settings/claude'))
 		await page.waitForTimeout(1200)
@@ -236,6 +260,8 @@ const main = async () => {
 			writeFileSync(join(CLONE, p), files[p])
 		}
 		console.log(`extension wrote: ${written.join(', ') || 'nothing'}`)
+		const outside = Object.keys(files).filter((p) => !p.startsWith('bridge/') && !seeded.has(p))
+		console.log(`records written: ${Object.keys(files).filter((p) => p.startsWith('bridge/records/ext-')).length}; files written outside bridge/: ${outside.length ? outside.join(', ') : 'none'}`)
 		console.log(`requests: ${log.length} (${log.filter((l) => l.includes('/git/trees/')).length} tree reads)`)
 	}
 }

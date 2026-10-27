@@ -6,7 +6,7 @@
 // guesses. "Where have I seen this error before" is the most common question
 // anyone asks their own notes, and it had no answer.
 
-export type HitKind = 'entry' | 'note' | 'learning' | 'ticket' | 'link' | 'task' | 'page'
+export type HitKind = 'entry' | 'note' | 'learning' | 'ticket' | 'link' | 'task' | 'page' | 'brain'
 
 export interface Hit {
 	kind: HitKind
@@ -30,6 +30,8 @@ export interface Haystack {
 	links: { ticketId: string; ticketName: string; title: string; url: string; note?: string; addedAt?: number }[]
 	tasks: { uid: string; title: string; key?: string; status: string; createdAt: number }[]
 	pages?: { number: number; title: string; text: string; url: string; at: number }[]
+	/** The Brain: what Claude Code and this browser recorded, by any device. */
+	brain?: { id: string; title: string; subtitle?: string; kind: string; ticket?: string; more: string; at: number }[]
 }
 
 export const KIND_LABEL: Record<HitKind, string> = {
@@ -40,6 +42,7 @@ export const KIND_LABEL: Record<HitKind, string> = {
 	link: 'Link',
 	task: 'Task',
 	page: 'Note on a page',
+	brain: 'Brain',
 }
 
 /**
@@ -56,8 +59,8 @@ export function findAll(query: string, hay: Haystack, limit = 60): Hit[] {
 	const words = q.split(/\s+/).filter(Boolean)
 	const out: Hit[] = []
 
-	const add = (kind: HitKind, text: string, where: string, at: number, extra: Partial<Hit> = {}) => {
-		const hay = `${text} ${where}`.toLowerCase()
+	const add = (kind: HitKind, text: string, where: string, at: number, extra: Partial<Hit> = {}, more = '') => {
+		const hay = `${text} ${where} ${more}`.toLowerCase()
 		if (!words.every((w) => hay.includes(w))) return
 		let score = 1
 		if (hay.includes(q)) score += 6
@@ -73,6 +76,9 @@ export function findAll(query: string, hay: Haystack, limit = 60): Hit[] {
 	for (const l of hay.links) add('link', l.note || l.title, l.ticketName, l.addedAt ?? 0, { hash: `#/links/${l.ticketId}`, url: l.url })
 	for (const t of hay.tasks) add('task', t.title, t.key ?? (t.status === 'done' ? 'Done' : 'Task'), t.createdAt, { hash: '#/tasks' })
 	for (const p of hay.pages ?? []) add('page', p.text, p.title, p.at, { url: p.url })
+	// Searched in full — body, root cause, next action — but shown by title,
+	// which is what a Brain entry is written to be found by.
+	for (const b of hay.brain ?? []) add('brain', b.subtitle ? `${b.title} — ${b.subtitle}` : b.title, [b.kind, b.ticket].filter(Boolean).join(' · '), b.at, { hash: b.ticket ? `#/brain/${b.ticket}` : '#/brain' }, b.more)
 
 	return out.sort((a, b) => b.score - a.score || b.at - a.at).slice(0, limit)
 }

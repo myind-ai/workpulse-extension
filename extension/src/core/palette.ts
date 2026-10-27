@@ -9,7 +9,7 @@
 // So: one keystroke, a box, and everything the app can do in it. Type to
 // filter, Tab to change what you are doing with what you typed, Enter to do it.
 
-export type Mode = 'go' | 'log' | 'page' | 'learn' | 'task' | 'ticket' | 'group' | 'focus'
+export type Mode = 'go' | 'log' | 'page' | 'learn' | 'brain' | 'task' | 'ticket' | 'group' | 'focus'
 
 export interface ModeSpec {
 	id: Mode
@@ -30,6 +30,9 @@ export const MODES: ModeSpec[] = [
 	// same mode, because they are the same thought.
 	{ id: 'page', label: 'This page', hint: 'Enter keeps it against this page', empty: 'What is worth remembering about this page', needsText: true },
 	{ id: 'learn', label: 'Learned', hint: 'Enter saves it to your learnings', empty: 'Something worth remembering, or not repeating', needsText: true },
+	// The thread of the work, for whoever picks it up next — you tomorrow, or
+	// Claude Code in its next session. The ticket comes from the page.
+	{ id: 'brain', label: 'Save context', hint: 'Enter saves it to the Brain', empty: 'Where you are and why — the ticket is picked up from the page', needsText: true },
 	{ id: 'task', label: 'To do', hint: 'Enter adds it to your tasks', empty: 'Something to come back to', needsText: true },
 	{ id: 'ticket', label: 'File page', hint: 'Enter files this page under it', empty: 'The ticket this page belongs to', needsText: false },
 	// Both directions in one mode, because they are the same thought: the name
@@ -44,7 +47,7 @@ export const MODES: ModeSpec[] = [
  * Which mode the words themselves imply.
  *
  * A prefix is faster than Tab once you know it, and invisible until you do.
- * `>` is a command, `#` is a learning, `/` is a search — the conventions people
+ * `>` is a command, `#` is a learning, `+` saves context, `/` is a search — the conventions people
  * already have from every other box like this.
  */
 export function modeFor(text: string, current: Mode): { mode: Mode; text: string } {
@@ -56,6 +59,7 @@ export function modeFor(text: string, current: Mode): { mode: Mode; text: string
 		[/^!\s*/, 'task'],
 		[/^@\s*/, 'page'],
 		[/^\*\s*/, 'group'],
+		[/^\+\s*/, 'brain'],
 	]
 	for (const [re, mode] of by) {
 		if (re.test(t)) return { mode, text: t.replace(re, '') }

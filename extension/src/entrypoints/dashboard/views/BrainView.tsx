@@ -19,6 +19,8 @@ import { Busy } from '@/ui/Busy'
 import { useAction, useLive } from '@/ui/hooks'
 import { Markdown } from '@/ui/Markdown'
 
+import { Resume } from './Resume'
+
 const PAGE = 40
 const DAY = 86_400_000
 const KIND_COLOUR: Partial<Record<EntryKind, string>> = { mistake: 'wp-chip-warn', ticket: 'wp-chip-accent', debug: 'wp-chip-accent' }
@@ -108,6 +110,14 @@ export function BrainView({ arg }: { arg?: string }) {
 
 			{sync.busy && <Art name="reading" size={48} delay={400} />}
 			{(sync.error || data?.error) && <div className="wp-banner wp-small">{sync.error || data?.error}</div>}
+
+			{!!data?.queued && (
+				<div className="wp-banner wp-small">
+					{data.queued} {data.queued === 1 ? 'entry is' : 'entries are'} saved in this browser and not in the repository yet. {data.ready ? 'Sync now sends them.' : 'They go once a repository is set up.'}
+				</div>
+			)}
+
+			{data?.ready && !ticket && <Resume limit={6} />}
 
 			{data && !data.ready ? (
 				<div className="wp-card wp-stack-sm">
