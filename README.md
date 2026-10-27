@@ -51,6 +51,10 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
 3. **Connect the extension**: Settings → Backup. The token button opens GitHub's token page already filled in
    (Contents: Read and write, 90 days). Pick only your Brain repository, paste the token, and press **Back up now**.
 
+**Claude Code says `Plugin "workpulse-brain" not found in marketplace "workpulse"`?** The marketplace isn't added on that
+machine yet: run `/plugin marketplace add myind-ai/workpulse-extension`, then `/plugin install workpulse-brain@workpulse`. If it
+was added a while ago, run `/plugin marketplace update workpulse` first.
+
 Full guide, older Claude Code, Windows, and fixes: [docs/guides/connect-extension-and-claude-code.md](docs/guides/connect-extension-and-claude-code.md).
 
 **Optional: keep Jira tickets up to date.** This one works on its own, with no extension needed:

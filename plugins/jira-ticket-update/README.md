@@ -24,6 +24,9 @@ On Claude Code 2.1.275 or later, one line does both:
 Privacy: the plugin itself stores nothing remotely. Jira calls go through Atlassian's MCP server under your own
 login ([Atlassian privacy policy](https://www.atlassian.com/legal/privacy-policy)).
 
+**Says `Plugin "jira-ticket-update" not found in marketplace "workpulse"`?** Never added here: `/plugin marketplace add myind-ai/workpulse-extension`.
+Added before this plugin existed: `/plugin marketplace update workpulse`. Then install again.
+
 Then `/mcp` → **atlassian** → sign in with your Atlassian account (OAuth; no token to create or paste).
 If you already use the claude.ai Atlassian connector, that works too.
 

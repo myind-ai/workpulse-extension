@@ -158,3 +158,13 @@ describe('the end-to-end link test', () => {
 		expect(setupCommands('me/notes', 'brain').plugin).toContain('--marketplace myind-ai/workpulse-extension')
 	})
 })
+
+describe('when Claude Code says the plugin is not in the marketplace', () => {
+	it('should hand over both fixes: add the marketplace, or update an old copy of it', () => {
+		const c = setupCommands('me/notes', 'brain')
+		expect(c.marketplaceAdd).toBe('/plugin marketplace add myind-ai/workpulse-extension')
+		expect(c.marketplaceUpdate).toBe('/plugin marketplace update workpulse')
+		expect(c.installAt).toBe('/plugin install workpulse-brain@workpulse')
+		expect(c.plugin).toBe('/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension')
+	})
+})

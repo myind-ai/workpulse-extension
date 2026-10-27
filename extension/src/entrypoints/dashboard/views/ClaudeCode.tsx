@@ -149,6 +149,23 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 						<div style={{ marginTop: 4 }}>
 							<Command label="In Claude Code, run" text={cmd.plugin} />
 						</div>
+						{/* Claude Code's own message says "your local copy may be out of date" even when there is no
+						    copy at all, so the two real causes are spelled out here. */}
+						<details style={{ marginTop: 4 }}>
+							<summary className="wp-link" style={{ cursor: 'pointer' }}>
+								It says “Plugin … not found in marketplace "workpulse"”?
+							</summary>
+							<div className="wp-stack-sm" style={{ marginTop: 6 }}>
+								<span className="wp-muted">
+									The plugin is in its own marketplace, not Anthropic's directory, and each machine adds it once. Never added here: add it, then install.
+								</span>
+								<Command label="1. Add the marketplace" text={cmd.marketplaceAdd} />
+								<Command label="2. Install" text={cmd.installAt} />
+								<span className="wp-muted">Added a while ago (before a plugin you want existed)? Refresh it, then install again:</span>
+								<Command label="Refresh the marketplace" text={cmd.marketplaceUpdate} />
+								<span className="wp-muted">Then start a new Claude Code session so the plugin loads.</span>
+							</div>
+						</details>
 					</Step>
 					<Step ok={cli.length > 0}>
 						<strong>3. Link it</strong> — Claude asks one question, creates the repository private if it's missing, and links this machine.
@@ -197,7 +214,7 @@ export function ClaudeCode({ settings, onPatch }: { settings: Settings; onPatch:
 						<strong>5. Optional: Jira tickets kept up to date</strong> — a separate plugin, no extension needed. Claude comments on and moves your tickets on a PR,
 						always asking first.
 						<div className="wp-stack-sm" style={{ marginTop: 4 }}>
-							<Command label="In Claude Code, run" text={JIRA_COMMANDS.plugin} />
+							<Command label="In Claude Code, run (says not found? run the refresh line under step 2 first)" text={JIRA_COMMANDS.plugin} />
 							<Command label="Then sign in: run this and pick atlassian" text={JIRA_COMMANDS.signIn} />
 							<Command label="In a repository with ticket keys (Claude also offers this by itself), say" text={JIRA_COMMANDS.setup} />
 							<a className="wp-link" href={JIRA_COMMANDS.guide} target="_blank" rel="noreferrer">

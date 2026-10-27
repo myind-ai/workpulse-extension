@@ -287,6 +287,7 @@ node "$(ls -d ~/.claude/plugins/cache/*/jira-ticket-update/*/scripts | tail -1)/
 | You see | Cause | Fix |
 |---|---|---|
 | "Atlassian isn't signed in" / only `authenticate` tools | Not signed in on this machine | `/mcp` → atlassian → sign in |
+| `Plugin "jira-ticket-update" not found in marketplace "workpulse"` | The marketplace was never added on this machine, or was added before this plugin existed | `/plugin marketplace add myind-ai/workpulse-extension` (never added) or `/plugin marketplace update workpulse` (added earlier), then install again |
 | Two Atlassian servers in `/mcp` | You also have the claude.ai connector | Either works; disable one in `/mcp` if you like |
 | No reminder after a PR | No ticket key in the branch or title, or the prefix isn't in `prefixes` | Name branches `feature/PAY-123-…`, or add the prefix (`setup`) |
 | A reminder for `UTF-8` / `SHA-256` | No `prefixes` set | Run `setup`, or add `prefixes` to the team file |

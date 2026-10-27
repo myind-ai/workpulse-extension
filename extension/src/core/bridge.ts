@@ -389,7 +389,7 @@ export function setupCommands(
 	repo: string,
 	branch: string,
 	dir = '~/workpulse-extension',
-): { plugin: string; pluginOld: string; ask: string; connect: string; clone: string; setup: string; doctor: string } {
+): { plugin: string; pluginOld: string; marketplaceAdd: string; marketplaceUpdate: string; installAt: string; ask: string; connect: string; clone: string; setup: string; doctor: string } {
 	const cli = `node ${dir}/cli/wp-brain.mjs`
 	const flags = `--repo ${repo}${branch ? ` --branch ${branch}` : ''}`
 	return {
@@ -397,6 +397,11 @@ export function setupCommands(
 		// sentence to Claude links it (it runs `wp-brain init --create --steps`).
 		plugin: `/plugin install workpulse-brain --marketplace ${SOURCE_REPO.replace('https://github.com/', '')}`,
 		pluginOld: `/plugin marketplace add ${SOURCE_REPO.replace('https://github.com/', '')}  then  /plugin install workpulse-brain@workpulse`,
+		// "Plugin … not found in marketplace "workpulse"" has two causes: the marketplace was never added on
+		// this machine (installing as name@workpulse needs it), or it was added before that plugin existed.
+		marketplaceAdd: `/plugin marketplace add ${SOURCE_REPO.replace('https://github.com/', '')}`,
+		marketplaceUpdate: '/plugin marketplace update workpulse',
+		installAt: '/plugin install workpulse-brain@workpulse',
 		ask: `Link my WorkPulse Brain to ${repo}${branch ? ` (branch ${branch})` : ''}`,
 		// One line for macOS / Linux: checks Node, git and the gh login, installs or
 		// updates the CLI, then runs setup. clone + setup are the same by hand.

@@ -74,6 +74,17 @@ On Claude Code older than 2.1.275, use these two commands instead:
 /plugin install workpulse-brain@workpulse
 ```
 
+**It says `Plugin "workpulse-brain" not found in marketplace "workpulse"`?** The plugins live in their own
+marketplace, not Anthropic's directory, and each machine adds it once. Claude Code's own hint ("your local copy may
+be out of date") appears even when the marketplace was never added. Two causes, two fixes:
+
+| Cause | Fix |
+|---|---|
+| The marketplace was never added on this machine (you ran `…@workpulse`, or searched in `/plugin`) | `/plugin marketplace add myind-ai/workpulse-extension`, then `/plugin install workpulse-brain@workpulse` |
+| It was added before the plugin you want existed (e.g. `jira-ticket-update`) | `/plugin marketplace update workpulse`, then install again |
+
+Then start a new session so the plugin loads. Settings → Claude Code & the Brain → step 2 has the same, with copy buttons.
+
 The plugin brings the skill and both hooks (a brief at session start, an offer to record after a commit). You
 don't edit any settings by hand. In the next session, Claude notices the Brain isn't linked and offers to link it,
 or you can say it yourself:
@@ -171,9 +182,11 @@ filled in with your repository.
 | `Extension backup — not on this branch yet` | The extension's Branch differs from setup's. Make them the same, then **Back up now** |
 | `SessionStart hook / Stop hook — not installed` | With the plugin, this is expected: the plugin's hooks aren't in `settings.json`. Check `/plugin` shows workpulse-brain as enabled. Without the plugin, run the connect line again and answer yes |
 | `Config missing` | Run the connect line |
+| Claude Code: `Plugin … not found in marketplace "workpulse"` | See *It says … not found* under step 2: add the marketplace, or `/plugin marketplace update workpulse` |
 
 ## What changed
 
+- 2026-10-27 (1.6.2): what to do when Claude Code says `Plugin … not found in marketplace "workpulse"` (here, in Settings and in the release notes).
 - 2026-10-27 (1.6.1): a repository that already holds your backup is restored from, never written over by a fresh install.
 - 2026-10-27 (1.6.0): fewer steps. The extension and setup both default to the `brain` branch (the "Branch: set this
   first" step is gone), setup takes every recommended answer with one Enter, Claude asks one question instead of two,
