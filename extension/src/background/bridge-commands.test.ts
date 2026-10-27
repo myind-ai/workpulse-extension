@@ -168,3 +168,56 @@ describe('update check', () => {
 		vi.unstubAllGlobals()
 	})
 })
+
+describe('managing what was saved', () => {
+	beforeEach(connect)
+
+	it('edits, archives, restores and deletes with one-line changes in this browser’s own file', async () => {
+		const e = await cmd.bridgeAdd({ kind: 'learning', scope: 'work', title: 'Keys per HTTP attempt #retry' })
+		await cmd.bridgeAmend(e.id, { set: { title: 'Keys per logical operation, not per attempt', tags: ['retry', 'payments'] } })
+		let view = await cmd.bridge()
+		expect(view.entries).toHaveLength(1)
+		expect(view.entries[0]).toMatchObject({ id: e.id, title: 'Keys per logical operation, not per attempt', tags: ['retry', 'payments'] })
+		// Every write went to this browser's own entries file (and the first one's record); nothing else.
+		expect(new Set(remote.commits.flat().filter((p) => p.includes('/entries/'))).size).toBe(1)
+		expect(remote.commits[1]).toHaveLength(1)
+
+		await cmd.bridgeAmend(e.id, { state: 'archived' })
+		view = await cmd.bridge()
+		expect(view.entries).toHaveLength(0)
+		expect(view.archived.map((x) => x.id)).toEqual([e.id])
+		expect((await cmd.findAll('logical operation')).hits.filter((h) => h.kind === 'brain')).toHaveLength(0)
+
+		await cmd.bridgeAmend(e.id, { state: 'active' })
+		expect((await cmd.bridge()).entries).toHaveLength(1)
+		await cmd.bridgeAmend(e.id, { state: 'deleted' })
+		view = await cmd.bridge()
+		expect([view.entries.length, view.archived.length]).toEqual([0, 0])
+	})
+
+	it('does not save the same learning twice, and points at the one there is', async () => {
+		const first = await cmd.bridgeAdd({ kind: 'learning', scope: 'work', title: 'Guard at the server #idempotency' })
+		const again = await cmd.bridgeAdd({ kind: 'learning', scope: 'work', title: 'guard at the server.' })
+		expect(again).toMatchObject({ id: first.id, duplicate: true })
+		expect(remote.commits).toHaveLength(1)
+		expect((await cmd.bridgeAdd({ kind: 'mistake', scope: 'work', title: 'Guard at the server' })).duplicate).toBeUndefined()
+	})
+
+	it('refuses an empty title or no change, and an entry it does not know', async () => {
+		const e = await cmd.bridgeAdd({ kind: 'note', scope: 'work', title: 'A note' })
+		await expect(cmd.bridgeAmend(e.id, { set: { title: '  ' } })).rejects.toThrow('empty')
+		await expect(cmd.bridgeAmend(e.id, {})).rejects.toThrow('Nothing to change')
+		await expect(cmd.bridgeAmend('e_nope', { state: 'archived' })).rejects.toThrow('not here')
+	})
+
+	it('applies an edit made offline at once, and sends it later', async () => {
+		const e = await cmd.bridgeAdd({ kind: 'note', scope: 'work', title: 'Before' })
+		remote.down = true
+		expect((await cmd.bridgeAmend(e.id, { set: { title: 'After' } })).queued).toBe(true)
+		expect((await cmd.bridge()).entries[0].title).toBe('After')
+		remote.down = false
+		await cmd.pollBridge()
+		expect((await cmd.bridge()).queued).toBe(0)
+		expect((await cmd.bridge()).entries[0].title).toBe('After')
+	})
+})

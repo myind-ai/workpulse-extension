@@ -59,7 +59,24 @@ export interface BridgeEntry {
 	status?: string
 	next?: string[]
 	links?: { pr?: string; commits?: string[]; related?: string[]; urls?: string[] }
+	/**
+	 * A change to another entry, not an entry of its own. The Brain stays
+	 * append-only with one writer per file, so editing, archiving or deleting is
+	 * a new line, from any device, that `fold` applies to the entry it names.
+	 */
+	amends?: string
+	/** With `amends`: archive, bring back, or hide everywhere. */
+	state?: 'archived' | 'active' | 'deleted'
+	/** With `amends`: the fields that change. */
+	set?: Partial<Pick<BridgeEntry, EditableField>>
+	/** Set by `fold`, never written: archived, and when it was last changed. */
+	archived?: boolean
+	editedAt?: number
 }
+
+/** What an edit may change. */
+export const EDITABLE = ['title', 'subtitle', 'body', 'kind', 'tags', 'ticket', 'project', 'asked', 'done', 'rootCause', 'status', 'next'] as const
+export type EditableField = (typeof EDITABLE)[number]
 
 /** A request from the extension for the CLI to pick up. */
 export interface InboxMessage {
@@ -134,18 +151,79 @@ export function parseJsonl(text: string): BridgeEntry[] {
 		.filter((e): e is BridgeEntry => !!e)
 }
 
-/** Every entry from every file, once each, newest first. */
-export function fold(files: Record<string, string>): BridgeEntry[] {
+/**
+ * Every entry from every file, once each, newest first, with every change
+ * applied: edits in the order they were made, archived entries left out
+ * (unless `archived`, when they come back marked), deleted ones gone.
+ */
+export function fold(files: Record<string, string>, opts: { archived?: boolean } = {}): BridgeEntry[] {
 	const byId = new Map<string, BridgeEntry>()
+	const changes: BridgeEntry[] = []
 	for (const [path, text] of Object.entries(files)) {
 		if (!path.endsWith('.jsonl')) continue
 		for (const e of parseJsonl(text)) {
+			if (typeof e.amends === 'string') {
+				changes.push(e)
+				continue
+			}
 			const had = byId.get(e.id)
 			if (!had || had.at <= e.at) byId.set(e.id, e)
 		}
 	}
-	return [...byId.values()].sort((a, b) => b.at - a.at)
+	const gone = new Set<string>()
+	// By time; at the same millisecond, in the order they were written (the sort is stable).
+	for (const c of changes.sort((a, b) => a.at - b.at)) {
+		const target = byId.get(c.amends!)
+		if (!target) continue
+		const next: BridgeEntry = { ...target, editedAt: c.at }
+		for (const key of EDITABLE) {
+			const v = c.set?.[key]
+			if (v === undefined) continue
+			if (key === 'kind' && !KINDS.includes(v as EntryKind)) continue
+			;(next as unknown as Record<string, unknown>)[key] = v === '' || (Array.isArray(v) && !v.length) ? undefined : v
+		}
+		if (!next.title?.trim()) next.title = target.title
+		if (c.state === 'archived') next.archived = true
+		if (c.state === 'active') next.archived = undefined
+		if (c.state === 'deleted') gone.add(target.id)
+		if (c.state === 'active') gone.delete(target.id)
+		byId.set(target.id, next)
+	}
+	return [...byId.values()].filter((e) => !gone.has(e.id) && (opts.archived || !e.archived)).sort((a, b) => b.at - a.at)
 }
+
+/**
+ * Every entry a browser knows, changes applied: what the last sync read, plus
+ * what is waiting to be sent (as if it were one more file, so a change made
+ * offline applies too).
+ */
+export const brainOf = (rt: { bridge?: { files?: Record<string, string>; queue?: BridgeEntry[] } }, archived = false): BridgeEntry[] =>
+	fold({ ...(rt.bridge?.files ?? {}), 'queue/this-browser.jsonl': (rt.bridge?.queue ?? []).map((e) => JSON.stringify(e)).join('\n') }, { archived })
+
+/** Two titles that say the same thing: case, spacing, #tags and a closing full stop aside. */
+export const sameTitle = (a: string, b: string) => {
+	const key = (t: string) => t.toLowerCase().replace(/(^|\s)#[\w-]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s.,;:!…]+$/g, '').trim()
+	return key(a) === key(b)
+}
+
+/** An entry already in the Brain that says the same thing as this one would. */
+export const duplicateOf = (entries: BridgeEntry[], kind: EntryKind, title: string, ticket?: string) =>
+	entries.find((e) => e.kind === kind && sameTitle(e.title, title) && (e.ticket ?? '') === (ticket ?? ''))
+
+/** The entry a person means by `ref`: its id, or a unique piece of it (the last 8 characters, as shown). */
+export function entryByRef(entries: BridgeEntry[], ref: string): BridgeEntry | { error: string } {
+	const r = ref.trim().replace(/^\[|\]$/g, '')
+	if (r.length < 4) return { error: 'Give at least 4 characters of the id.' }
+	const exact = entries.find((e) => e.id === r)
+	if (exact) return exact
+	const flat = (id: string) => id.replace(/[^a-z0-9]/gi, '')
+	const hits = entries.filter((e) => e.id.endsWith(r) || flat(e.id).endsWith(flat(r)) || e.id.includes(r))
+	if (hits.length === 1) return hits[0]
+	return { error: hits.length ? `${hits.length} entries match "${r}"; give more of the id.` : `No entry matches "${r}".` }
+}
+
+/** The last 8 characters of an id: what lists show, and what edit, archive and rm take. */
+export const shortId = (id: string) => id.replace(/[^a-z0-9]/gi, '').slice(-8)
 
 export interface Filter {
 	kind?: EntryKind | 'all'

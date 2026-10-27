@@ -39,7 +39,7 @@ import { overtime, overtimeLine, type Overtime, type WorkedDay } from '@/core/ov
 import { periodReport, periodText, spanFrom, type PeriodReport, type Span } from '@/core/period'
 import { countKinds, findAll, type Hit, type HitKind } from '@/core/find'
 import { matchBrain, parseBrainQuery } from '@/core/brain-query'
-import { fold, KIND_LABEL as BRAIN_KIND } from '@/core/bridge'
+import { brainOf, KIND_LABEL as BRAIN_KIND } from '@/core/bridge'
 import { isComplete, lastDays, lockLine, owedDays, streakOf, type DayState, type Owed, type Streak } from '@/core/habit'
 import { leftAt, regularisationNote } from '@/core/closeout'
 import { describeAdd, shortTicket, undoLabel, undoOffered, type Undoable } from '@/core/undo'
@@ -3418,7 +3418,7 @@ export class DayCommands {
 		const today = istDate(this.now())
 		const from = addDays(today, -days)
 		const [tickets, tasks, learnings, rt] = await Promise.all([this.store.workspaces(), this.store.tasks(), this.store.learnings(), this.store.runtime()])
-		const all = [...new Map([...(rt.bridge?.queue ?? []), ...fold(rt.bridge?.files ?? {})].map((e) => [e.id, e])).values()]
+		const all = brainOf(rt)
 		const asHay = (list: typeof all) => list.map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: BRAIN_KIND[e.kind] ?? e.kind, ticket: e.ticket, at: e.at, more: [e.body, e.asked, e.done, e.rootCause, e.project, ...(e.tags ?? []), ...(e.next ?? [])].filter(Boolean).join(' ') }))
 		// `ticket:`, `type:`, `has:next-action` … are about the Brain: with any of
 		// them, the search is the Brain's alone, and filters with no words list

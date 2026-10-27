@@ -21,8 +21,11 @@
 //   wp-brain add <kind> "title" [--subtitle TEXT] [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
+//                                       (an entry already there with the same kind and title is skipped; --force adds it)
 //   wp-brain brief [TICKET] [--project P] [--about "words"]   what to know before starting (+ related learnings)
-//   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N]
+//   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N] [--archived]
+//   wp-brain edit ID [--title T] [--subtitle T] [--body T] [--tags a,b] [--root-cause T] [--next T]… [--status S] [--kind K]
+//   wp-brain archive ID | restore ID | rm ID [--purge]     (ID: the [xxxxxxxx] every list shows)
 //   wp-brain search "words" [--limit N]     ranked past work; filters: ticket: type: status:open|done repo: tag:/#tag
 //                                           after:/before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:
 //   wp-brain index [--no-push]              add any missing records of this device; write INDEX.md and graph.json
@@ -38,7 +41,7 @@
 // ever written.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,7 +51,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	console.error(`wp-brain needs Node 22.18 or newer (it loads the extension's TypeScript directly).\n${e.message}`)
 	process.exit(1)
 })
-const { KINDS, ROOT, appendLine, entriesPath, filter, fold, newEntry, reportMarkdown, secretsIn, summarise } = bridge
+const { EDITABLE, KINDS, ROOT, appendLine, duplicateOf, entriesPath, entryByRef, filter, fold, newEntry, reportMarkdown, secretsIn, shortId, summarise } = bridge
 const { brainIndex, brainRecord } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
 const { searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-query.ts'))
 const { doctor, ensureRepo, extensionSteps, nudgeText, settingsHasHook, setup } = await import(join(here, 'setup.mjs'))
@@ -96,7 +99,7 @@ function pull(cfg) {
 }
 
 function commitAndPush(cfg, paths, message, push = true) {
-	git(cfg, 'add', '--', ...paths)
+	git(cfg, 'add', '-A', '--', ...paths) // -A: a purged record is a deletion to stage
 	if (!git(cfg, 'status', '--porcelain', '--', ...paths)) return false
 	git(cfg, 'commit', '--quiet', '-m', message)
 	if (push) {
@@ -114,7 +117,7 @@ function commitAndPush(cfg, paths, message, push = true) {
 	return true
 }
 
-function readAll(cfg) {
+function readAll(cfg, archived = false) {
 	const files = {}
 	const dir = join(cfg.clone, ROOT, 'entries')
 	if (existsSync(dir)) {
@@ -124,10 +127,10 @@ function readAll(cfg) {
 		}
 	}
 	// A learning the extension copied to bridge/ is also in its backup, under the
-	// same `journal:<id>`: one line, not two.
-	const live = fold(files)
-	const seen = new Set(live.map((e) => e.id))
-	return [...live, ...fromBackup(cfg).filter((e) => !seen.has(e.id))].sort((a, b) => b.at - a.at)
+	// same `journal:<id>`: one line, not two. Read as one more file, so an edit,
+	// archive or delete made to it from any device applies here too.
+	files['workpulse-backup.jsonl'] = fromBackup(cfg).map((e) => JSON.stringify(e)).join('\n')
+	return fold(files, { archived })
 }
 
 /**
@@ -187,7 +190,8 @@ function die(msg) {
 
 const day = (t) => new Date(t).toISOString().slice(0, 10)
 // A title that already starts with its ticket key does not need it twice.
-const short = (e) => `${day(e.at)}  ${e.kind.padEnd(8)} ${e.scope === 'personal' ? '[personal] ' : ''}${e.ticket ? e.ticket + ' ' : ''}${e.project ? '(' + e.project + ') ' : ''}${e.ticket && e.title.toUpperCase().startsWith(e.ticket) ? e.title.slice(e.ticket.length).replace(/^[\s:—-]+/, '') : e.title}`
+// The [id] at the end is what edit, archive, restore and rm take.
+const short = (e) => `${day(e.at)}  ${e.kind.padEnd(8)} ${e.scope === 'personal' ? '[personal] ' : ''}${e.archived ? '[archived] ' : ''}${e.ticket ? e.ticket + ' ' : ''}${e.project ? '(' + e.project + ') ' : ''}${e.ticket && e.title.toUpperCase().startsWith(e.ticket) ? e.title.slice(e.ticket.length).replace(/^[\s:—-]+/, '') : e.title}  [${shortId(e.id)}]`
 
 /** An entry's readable record, written once, by the device that wrote the entry. */
 function writeRecord(cfg, entry) {
@@ -310,19 +314,27 @@ const commands = {
 		pull(cfg)
 		const now = Date.now()
 		const written = new Set()
+		const known = opt.force ? [] : readAll(cfg)
 		let n = 0
 		for (const input of inputs) {
-			const { schema, id, at, device, ...rest } = input
+			const { schema, id, at, device, archived, editedAt, ...rest } = input
 			const scope = rest.scope === 'personal' ? 'personal' : 'work'
+			// The same thing said twice is noise in every brief: point at the one there is.
+			const same = !rest.amends && duplicateOf(known, rest.kind, String(rest.title ?? ''), rest.ticket ? String(rest.ticket).toUpperCase() : undefined)
+			if (same) {
+				console.log(`= already there: ${short(same)}  (edit it with: wp-brain edit ${shortId(same.id)} …; --force adds anyway)`)
+				continue
+			}
 			const entry = newEntry({ ...rest, scope, kind: rest.kind }, cfg.device, now + n++) // throws on anything secret-shaped
 			const rel = entriesPath(entry.at, cfg.device)
 			const abs = join(cfg.clone, rel)
 			mkdirSync(dirname(abs), { recursive: true })
 			writeFileSync(abs, appendLine(existsSync(abs) ? readFileSync(abs, 'utf8') : null, entry))
 			written.add(rel)
-			written.add(writeRecord(cfg, entry))
+			if (!entry.amends) written.add(writeRecord(cfg, entry))
 			console.log(`+ ${short(entry)}`)
 		}
+		if (!written.size) return console.log('Nothing new to save.')
 		const first = inputs[0]
 		const what = inputs.length === 1 ? `${first.kind} — ${String(first.title).slice(0, 60)}` : `${inputs.length} entries${first.ticket ? ' for ' + first.ticket : ''}`
 		const pushed = commitAndPush(cfg, [...written], `bridge: ${what}`, !opt['no-push'])
@@ -418,9 +430,68 @@ const commands = {
 	list({ opt }) {
 		const cfg = config()
 		pull(cfg)
-		const got = filter(readAll(cfg), { kind: opt.kind, scope: opt.scope, ticket: opt.ticket?.toUpperCase(), project: opt.project, query: opt.query })
+		const all = readAll(cfg, !!opt.archived)
+		const got = filter(opt.archived ? all.filter((e) => e.archived) : all, { kind: opt.kind, scope: opt.scope, ticket: opt.ticket?.toUpperCase(), project: opt.project, query: opt.query })
 		for (const e of got.slice(0, Number(opt.limit) || 30)) console.log(short(e))
 		if (!got.length) console.log('Nothing matches.')
+	},
+
+	/** Change an entry: wp-brain edit ID --title … --body … --tags a,b --root-cause … --next … --status … --kind … */
+	edit({ pos, opt }) {
+		const set = {}
+		const flag = { title: 'title', subtitle: 'subtitle', body: 'body', kind: 'kind', ticket: 'ticket', project: 'project', asked: 'asked', done: 'done', 'root-cause': 'rootCause', status: 'status' }
+		for (const [f, key] of Object.entries(flag)) if (typeof opt[f] === 'string') set[key] = f === 'ticket' ? opt[f].toUpperCase() : opt[f]
+		if (opt['body-file']) set.body = readFileSync(opt['body-file'], 'utf8')
+		if (typeof opt.tags === 'string') set.tags = opt.tags.split(',').map((t) => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean)
+		if (opt.next) set.next = opt.next.filter((x) => typeof x === 'string')
+		if (set.kind && !KINDS.includes(set.kind)) die(`--kind must be one of ${KINDS.join(', ')}`)
+		if ('title' in set && !set.title.trim()) die('A title cannot be empty.')
+		if (!Object.keys(set).length) die('Usage: wp-brain edit ID [--title T] [--subtitle T] [--body T|--body-file F] [--tags a,b] [--root-cause T] [--next T]… [--status S] [--kind K] [--ticket K] [--project P]')
+		amend(pos[0], { set }, opt)
+	},
+
+	/** Out of lists, search and briefs; restore brings it back. */
+	archive({ pos, opt }) {
+		amend(pos[0], { state: 'archived' }, opt)
+	},
+
+	restore({ pos, opt }) {
+		amend(pos[0], { state: 'active' }, opt)
+	},
+
+	/**
+	 * Hide an entry everywhere. --purge also removes this machine's own line and
+	 * record for good (only its own: every file has one writer); the repository's
+	 * history still has them.
+	 */
+	rm({ pos, opt }) {
+		const cfg = config()
+		pull(cfg)
+		const e = pick(readAll(cfg, true), pos[0])
+		if (!opt.purge) return amend(pos[0], { state: 'deleted' }, opt)
+		if (e.device !== cfg.device) die(`${shortId(e.id)} was written by ${e.device}; only that device can purge it. Without --purge it is hidden everywhere.`)
+		const paths = []
+		const dir = join(cfg.clone, ROOT, 'entries')
+		for (const month of existsSync(dir) ? readdirSync(dir) : []) {
+			const rel = `${ROOT}/entries/${month}/${cfg.device}.jsonl`
+			const abs = join(cfg.clone, rel)
+			if (!existsSync(abs)) continue
+			const lines = readFileSync(abs, 'utf8').split('\n')
+			const kept = lines.filter((l) => {
+				try {
+					const o = JSON.parse(l)
+					return o.id !== e.id && o.amends !== e.id
+				} catch {
+					return true
+				}
+			})
+			if (kept.length !== lines.length) (writeFileSync(abs, kept.join('\n')), paths.push(rel))
+		}
+		const record = brainRecord(e).path
+		// Removed from disk only; commitAndPush stages it as a deletion.
+		if (existsSync(join(cfg.clone, record))) (rmSync(join(cfg.clone, record)), paths.push(record))
+		const pushed = commitAndPush(cfg, paths, `bridge: purge ${shortId(e.id)}`, !opt['no-push'])
+		console.log(`Purged ${shortId(e.id)} from this machine's files${pushed && !opt['no-push'] ? ' and pushed' : ''}. It is gone from every reader; git history keeps the old commits.`)
 	},
 
 	search({ pos, opt }) {
@@ -505,6 +576,30 @@ const commands = {
 	help() {
 		console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(0, 30).map((l) => l.slice(3)).join('\n'))
 	},
+}
+
+/** The entry `ref` names (its [id] as lists show it), or the reason it cannot be found. */
+function pick(all, ref) {
+	if (!ref) die('Give the entry id, as lists show it in [brackets]. Find it with: wp-brain search "words"')
+	const got = entryByRef(all, ref)
+	if (got.error) die(got.error)
+	return got
+}
+
+/** One change line in this machine's own file, applied by every reader. */
+function amend(ref, change, opt) {
+	const cfg = config()
+	pull(cfg)
+	const target = pick(readAll(cfg, true), ref)
+	const entry = newEntry({ kind: target.kind, scope: target.scope, title: target.title, amends: target.id, ...change }, cfg.device, Date.now()) // refuses secrets
+	const rel = entriesPath(entry.at, cfg.device)
+	const abs = join(cfg.clone, rel)
+	mkdirSync(dirname(abs), { recursive: true })
+	writeFileSync(abs, appendLine(existsSync(abs) ? readFileSync(abs, 'utf8') : null, entry))
+	const what = change.state ?? `edit ${Object.keys(change.set ?? {}).join(', ')}`
+	const pushed = commitAndPush(cfg, [rel], `bridge: ${what} ${shortId(target.id)} — ${target.title.slice(0, 50)}`, !opt['no-push'])
+	const now = readAll(cfg, true).find((e) => e.id === target.id)
+	console.log(`${change.state === 'deleted' ? 'Deleted' : change.state === 'archived' ? 'Archived' : change.state === 'active' ? 'Restored' : 'Edited'}: ${now ? short(now) : target.title}${pushed && !opt['no-push'] ? '  (pushed)' : ''}`)
 }
 
 /** Where session markers live: one small file per Claude Code session. */

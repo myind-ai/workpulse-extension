@@ -1,6 +1,6 @@
 ---
 name: workpulse-brain
-description: Keep a running memory of every ticket, bug, debugging session, report, skill and side project in the WorkPulse bridge (a private GitHub repo the WorkPulse browser extension reads too). Read the brief BEFORE starting a ticket; write what was asked, done, broken and learned AFTER. Triggers on "start ticket", "working on PAY-123", "what did I learn about", "log this mistake", "record the root cause", "end of ticket", "write it to my brain", "weekly report", "what did I do this week", "side project log", "check the workpulse inbox", "wp-brain", "update the workpulse extension".
+description: Keep a running memory of every ticket, bug, debugging session, report, skill and side project in the WorkPulse bridge (a private GitHub repo the WorkPulse browser extension reads too). Read the brief BEFORE starting a ticket; write what was asked, done, broken and learned AFTER. Triggers on "start ticket", "working on PAY-123", "what did I learn about", "log this mistake", "record the root cause", "end of ticket", "write it to my brain", "weekly report", "what did I do this week", "side project log", "check the workpulse inbox", "wp-brain", "update the workpulse extension", "save it in learning", "save it as a learning", "save this in my learnings", "add to my learnings", "remember this", "note this down for later", "log a learning", "edit that learning", "archive that learning", "delete that learning", "show my learnings".
 ---
 
 # WorkPulse Brain
@@ -149,6 +149,29 @@ Rules:
 - **Always leave a resume point**: for unfinished work, set `--status "in progress" --next "the next concrete action"`. Claude must read that next action before continuing the same ticket or project.
 - **Never secrets**: the tool refuses anything token-shaped, but also leave out customer data, passwords and full logs.
 - Pushing to this private notes repo is the skill's purpose; it is the one push that needs no extra ask once the user has run `init`.
+
+## Managing what is saved
+
+Everything is append-only underneath (one writer per file, so nothing conflicts); a change is one more line
+that every reader applies. Every list and search shows an entry's id in `[brackets]`: that is what these take.
+
+```bash
+node $WP search "type:learning idempotency"           # find it (or: list --kind learning)
+node $WP edit 3f9a2c1d --title "better wording" --tags retry,payments --root-cause "…" --next "…"
+node $WP archive 3f9a2c1d                             # out of lists, search and briefs; still kept
+node $WP list --archived                              # what is archived
+node $WP restore 3f9a2c1d
+node $WP rm 3f9a2c1d                                  # hidden everywhere
+node $WP rm 3f9a2c1d --purge                          # this machine's own entry: its line and record removed for good
+```
+
+- **Don't save it twice.** `add` skips an entry with the same kind, title and ticket that is already there and
+  prints its id; improve that one with `edit` instead. `--force` adds anyway.
+- **When a learning turns out wrong or outdated**, edit it (or archive it) the moment you find out, so the next
+  brief does not repeat it.
+- **"Save it in learning"** from the user means `add learning "…" #tags`, nothing more to ask; add `--subtitle`
+  for why it matters and `--ticket` when it came from a ticket.
+- The extension's Brain page has the same: **Edit**, **Archive**, **Delete** on every entry, and **Archived**.
 
 ## Reports
 

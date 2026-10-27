@@ -2,7 +2,7 @@
 // that is no longer owed, builds a snapshot, asks `decide()` what to do and
 // does it. Every dependency is injected (Env) so it is tested with fakes.
 
-import { fold } from '@/core/bridge'
+import { brainOf } from '@/core/bridge'
 import { brainLearnings } from '@/core/bridge-learn'
 import { API_ENABLED, enabled } from '@/core/features'
 import { repeats } from '@/core/learn'
@@ -478,7 +478,7 @@ export class Engine {
 		if (rt.loopedAt != null && now - rt.loopedAt < 7 * DAY) return
 		// The same count the Learnings page shows: your own notes and what the
 		// Brain holds (Claude Code, other devices), without the copies of your own.
-		const brain = enabled('BRIDGE_SYNC') ? brainLearnings(fold(rt.bridge?.files ?? {})) : []
+		const brain = enabled('BRIDGE_SYNC') ? brainLearnings(brainOf(rt)) : []
 		const worst = repeats([...(await this.store.learnings()), ...brain], now)[0]
 		if (!worst) return
 		await this.store.updateRuntime((r) => void (r.loopedAt = now))

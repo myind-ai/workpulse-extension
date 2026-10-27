@@ -163,7 +163,7 @@ const main = async () => {
 
 	// Write one entry from the extension.
 	await page.getByRole('button', { name: '+ Add' }).click()
-	await page.getByPlaceholder(/One line/).fill(REAL ? 'Real GitHub round trip from the extension #bridge' : 'Tick clips need one backdrop, or they look like stickers #design')
+	await page.getByPlaceholder(/One line/).fill(REAL ? 'Real GitHub round trip from the extension #bridge' : `Tick clips need one backdrop, or they look like stickers (run ${Date.now().toString(36)}) #design`)
 	await page.getByPlaceholder('Project or repo').fill('workpulse')
 	if (!REAL) await shot('07-brain-add')
 	await page.getByRole('button', { name: 'Save', exact: true }).click()
@@ -251,6 +251,35 @@ const main = async () => {
 		void rel
 		await jira.close()
 		await page.bringToFront()
+
+		// Managing an entry from the Brain page: edit, archive, restore, delete.
+		await page.goto(ext('dashboard.html#/brain'))
+		await page.waitForTimeout(1200)
+		const card = page.locator('article.wp-card', { hasText: 'Use a queue for retries' }).first()
+		await card.getByRole('button', { name: 'Edit', exact: true }).click()
+		// One editor is open; the card no longer shows the title as text.
+		await page.getByLabel('Title', { exact: true }).fill('Use a durable queue for retries')
+		await page.getByRole('button', { name: 'Save changes' }).click()
+		await page.waitForTimeout(1500)
+		console.log(`edit: ${(await page.locator('article.wp-card', { hasText: 'Use a durable queue for retries' }).count()) ? 'title changed' : 'NOT changed'}`)
+		await shot('19-brain-edited')
+		const edited = page.locator('article.wp-card', { hasText: 'Use a durable queue for retries' }).first()
+		await edited.getByRole('button', { name: 'Archive', exact: true }).click()
+		await page.waitForTimeout(1500)
+		console.log(`archive: ${(await page.locator('article.wp-card', { hasText: 'Use a durable queue' }).count()) === 0 ? 'gone from the list' : 'STILL listed'}`)
+		await page.getByRole('button', { name: /^Archived \d+/ }).click()
+		await page.waitForTimeout(600)
+		await shot('20-brain-archived')
+		await page.locator('article.wp-card', { hasText: 'Use a durable queue' }).first().getByRole('button', { name: 'Restore' }).click()
+		await page.waitForTimeout(1500)
+		await page.getByRole('button', { name: /^Archived/ }).click().catch(() => undefined)
+		await page.waitForTimeout(600)
+		const back = page.locator('article.wp-card', { hasText: 'Use a durable queue' }).first()
+		console.log(`restore: ${(await back.count()) ? 'back in the list' : 'NOT back'}`)
+		await back.getByRole('button', { name: 'Delete', exact: true }).click()
+		await back.getByRole('button', { name: 'Yes' }).click()
+		await page.waitForTimeout(1500)
+		console.log(`delete: ${(await page.locator('article.wp-card', { hasText: 'Use a durable queue' }).count()) === 0 ? 'gone' : 'STILL there'}`)
 
 		// Settings → Claude Code & the Brain: the link, step by step, and the commands.
 		await page.goto(ext('dashboard.html#/settings/claude'))

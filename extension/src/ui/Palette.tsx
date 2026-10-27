@@ -239,7 +239,7 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 			} else if (mode === 'brain') {
 				const saved = await call('saveContext', { title: body, kind: ctxKind, next: nextStep.trim() || undefined, page })
 				setNextStep('')
-				setSaid(saved.queued ? 'Saved here — it goes to the Brain on the next sync' : `Saved to the Brain${saved.ticket ? ` under ${saved.ticket}` : ''}`)
+				setSaid(saved.duplicate ? 'Already in the Brain — nothing added' : saved.queued ? 'Saved here — it goes to the Brain on the next sync' : `Saved to the Brain${saved.ticket ? ` under ${saved.ticket}` : ''}`)
 			} else if (mode === 'page') {
 				if (!page) throw new Error('No page here to note.')
 				// The screenshot has to be taken by the background: a page cannot

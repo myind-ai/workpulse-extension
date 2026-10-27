@@ -30,7 +30,7 @@ Use whichever of these is available:
 |---|---|
 | Chrome Web Store | *(not yet listed; this guide gets updated once it is)* |
 | One line (Mac, Linux) | `curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/update.sh \| bash` puts the latest release in `~/WorkPulse/extension`. In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick that folder. The same line updates it later |
-| Release zip | Download `workpulse-extension-1.4.0-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it into a folder you keep (e.g. `~/WorkPulse/extension`). In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick that folder |
+| Release zip | Download `workpulse-extension-1.5.0-chrome.zip` from [the latest release](https://github.com/myind-ai/workpulse-extension/releases/latest) and unzip it into a folder you keep (e.g. `~/WorkPulse/extension`). In `chrome://extensions`, switch on **Developer mode**, click **Load unpacked**, and pick that folder |
 | From source | `git clone https://github.com/myind-ai/workpulse-extension && cd workpulse-extension/extension && npm install && npm run build`, then load `extension/.output/chrome-mv3` the same way |
 
 ### Updating

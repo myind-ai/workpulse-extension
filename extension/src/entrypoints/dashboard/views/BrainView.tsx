@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { describeFilters, matchBrain, parseBrainQuery } from '@/core/brain-query'
-import { filter, KIND_LABEL, KINDS, reportMarkdown, type BridgeEntry, type EntryKind, type Scope } from '@/core/bridge'
+import { filter, KIND_LABEL, KINDS, reportMarkdown, shortId, type BridgeEntry, type EditableField, type EntryKind, type Scope } from '@/core/bridge'
 import { enabled } from '@/core/features'
 import { fileName } from '@/core/export'
 import { istDate, prettyDate } from '@/core/time'
@@ -50,6 +50,8 @@ export function BrainView({ arg }: { arg?: string }) {
 	const [adding, setAdding] = useState(false)
 	const [asking, setAsking] = useState(false)
 	const [show, setShow] = useState(PAGE)
+	// Archived entries are out of every list until asked for, here.
+	const [archived, setArchived] = useState(false)
 	const personal = enabled('PERSONAL')
 
 	// A link from a ticket page (#/brain/PAY-2433) lands filtered to that ticket,
@@ -69,8 +71,8 @@ export function BrainView({ arg }: { arg?: string }) {
 	// it; whatever else is typed is searched as words, as before.
 	const parsed = useMemo(() => parseBrainQuery(query), [query])
 	const found = useMemo(
-		() => filter((data?.entries ?? []).filter((e) => matchBrain(e, parsed.filters)), { kind, scope, query: parsed.text, ticket, project }),
-		[data, kind, scope, parsed, ticket, project],
+		() => filter(((archived ? data?.archived : data?.entries) ?? []).filter((e) => matchBrain(e, parsed.filters)), { kind, scope, query: parsed.text, ticket, project }),
+		[data, kind, scope, parsed, ticket, project, archived],
 	)
 	const shown = found.slice(0, show)
 	const s = data?.summary
@@ -185,6 +187,11 @@ export function BrainView({ arg }: { arg?: string }) {
 						)}
 						<input className="wp-input wp-grow" style={{ minWidth: 180 }} placeholder="Search, or filter: ticket:PAY-1 type:debug status:open has:next-action #tag after:7d"
 							title="Filters: ticket: type: status:open|done repo: tag: (or #tag) after: before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:work|personal" value={query} onChange={(e) => setQuery(e.target.value)} />
+						{(!!data?.archived.length || archived) && (
+							<button className={archived ? 'wp-chip wp-chip-accent' : 'wp-chip'} style={{ cursor: 'pointer' }} aria-pressed={archived} onClick={() => setArchived(!archived)} title="Entries you archived: out of lists, search and Claude's brief">
+								Archived {data?.archived.length ?? 0}
+							</button>
+						)}
 						{describeFilters(parsed.filters).map((f) => (
 							<span key={f} className="wp-chip wp-chip-accent">
 								{f}
@@ -209,10 +216,10 @@ export function BrainView({ arg }: { arg?: string }) {
 									<strong>+ Add</strong>.
 								</div>
 							) : !shown.length ? (
-								<div className="wp-card wp-muted">Nothing matches that.</div>
+								<div className="wp-card wp-muted">{archived ? 'Nothing archived.' : 'Nothing matches that.'}</div>
 							) : (
 								shown.map((e) => (
-									<EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} ticketId={e.ticket && saved && e.ticket in saved ? saved[e.ticket] : undefined} onCreated={reloadSaved} />
+									<EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} ticketId={e.ticket && saved && e.ticket in saved ? saved[e.ticket] : undefined} onCreated={reloadSaved} onChanged={reload} />
 								))
 							)}
 							{shown.length < found.length && (
@@ -265,6 +272,7 @@ export function EntryCard({
 	onProject,
 	ticketId,
 	onCreated,
+	onChanged,
 }: {
 	e: BridgeEntry
 	onTicket: (k: string) => void
@@ -272,9 +280,15 @@ export function EntryCard({
 	/** The saved ticket for this entry's key: an id, null when there is none yet, undefined when not asked. */
 	ticketId?: string | null
 	onCreated?: () => void
+	/** Edit, archive and delete appear only where something can reload after them. */
+	onChanged?: () => void
 }) {
 	const [open, setOpen] = useState(false)
+	const [editing, setEditing] = useState(false)
+	const [confirm, setConfirm] = useState(false)
 	const make = useAction()
+	const change = useAction()
+	const amend = (c: Parameters<typeof call<'bridgeAmend'>>[2]) => change.run(async () => void (await call('bridgeAmend', e.id, c), setConfirm(false), setEditing(false), onChanged?.()))
 	const detail = !!(e.body || e.asked || e.done || e.rootCause || e.next?.length || e.links)
 	const newTicket = () =>
 		make.run(async () => {
@@ -310,11 +324,49 @@ export function EntryCard({
 					)}
 					{e.status && <span className="wp-muted">· {e.status}</span>}
 				</span>
-				<span className="wp-muted" title={e.device}>
-					{prettyDate(istDate(e.at))}
+				<span className="wp-row-wrap">
+					<span className="wp-muted" title={`${e.device} · id ${shortId(e.id)}${e.editedAt ? ` · edited ${prettyDate(istDate(e.editedAt))}` : ''}`}>
+						{prettyDate(istDate(e.at))}
+						{e.editedAt ? ' · edited' : ''}
+					</span>
+					{onChanged && !editing && (
+						<span className="wp-row" style={{ gap: 6 }}>
+							{e.archived ? (
+								<button className="wp-action" disabled={change.busy} onClick={() => amend({ state: 'active' })}>
+									Restore
+								</button>
+							) : (
+								<>
+									<button className="wp-action" onClick={() => setEditing(true)}>
+										Edit
+									</button>
+									<button className="wp-action" disabled={change.busy} onClick={() => amend({ state: 'archived' })} title="Out of lists, search and Claude's brief; Restore brings it back">
+										Archive
+									</button>
+								</>
+							)}
+							{confirm ? (
+								<span className="wp-row" style={{ gap: 4 }}>
+									<span className="wp-muted">Delete everywhere?</span>
+									<button className="wp-action" disabled={change.busy} onClick={() => amend({ state: 'deleted' })}>
+										Yes
+									</button>
+									<button className="wp-action wp-muted" onClick={() => setConfirm(false)}>
+										No
+									</button>
+								</span>
+							) : (
+								<button className="wp-action wp-muted" onClick={() => setConfirm(true)}>
+									Delete
+								</button>
+							)}
+						</span>
+					)}
 				</span>
 			</div>
-			<strong>{e.title}</strong>
+			{change.error && <div className="wp-banner wp-small">{change.error}</div>}
+			{editing ? <EditEntry e={e} busy={change.busy} onSave={(set) => amend({ set })} onCancel={() => setEditing(false)} /> : <strong>{e.title}</strong>}
+			{!editing && e.subtitle && <span className="wp-muted wp-small">{e.subtitle}</span>}
 			{detail && (
 				<button className="wp-action wp-small" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(!open)} aria-expanded={open}>
 					{open ? 'less' : 'more'}
@@ -372,6 +424,53 @@ export function EntryCard({
 	)
 }
 
+/** The fields worth correcting later. Only what changed is written. */
+function EditEntry({ e, busy, onSave, onCancel }: { e: BridgeEntry; busy: boolean; onSave: (set: Partial<Pick<BridgeEntry, EditableField>>) => void; onCancel: () => void }) {
+	const [f, setF] = useState({ title: e.title, subtitle: e.subtitle ?? '', body: e.body ?? '', rootCause: e.rootCause ?? '', next: (e.next ?? []).join('\n'), tags: (e.tags ?? []).join(', '), kind: e.kind })
+	const save = () => {
+		const set: Partial<Pick<BridgeEntry, EditableField>> = {}
+		if (f.title.trim() !== e.title) set.title = f.title.trim()
+		if (f.subtitle.trim() !== (e.subtitle ?? '')) set.subtitle = f.subtitle.trim()
+		if (f.body !== (e.body ?? '')) set.body = f.body
+		if (f.rootCause.trim() !== (e.rootCause ?? '')) set.rootCause = f.rootCause.trim()
+		if (f.kind !== e.kind) set.kind = f.kind
+		const next = f.next.split('\n').map((x) => x.trim()).filter(Boolean)
+		if (next.join('\n') !== (e.next ?? []).join('\n')) set.next = next
+		const tags = f.tags.split(/[,\s]+/).map((x) => x.replace(/^#/, '').trim().toLowerCase()).filter(Boolean)
+		if (tags.join(',') !== (e.tags ?? []).join(',')) set.tags = tags
+		if (Object.keys(set).length) onSave(set)
+		else onCancel()
+	}
+	return (
+		<div className="wp-stack-sm wp-small">
+			<input className="wp-input" value={f.title} onChange={(x) => setF({ ...f, title: x.target.value })} aria-label="Title" />
+			<input className="wp-input" value={f.subtitle} placeholder="Subtitle: why it matters, in one line" onChange={(x) => setF({ ...f, subtitle: x.target.value })} aria-label="Subtitle" />
+			<div className="wp-row-wrap">
+				<select className="wp-select wp-sm" style={{ width: 150 }} value={f.kind} onChange={(x) => setF({ ...f, kind: x.target.value as EntryKind })} aria-label="Type">
+					{KINDS.map((k) => (
+						<option key={k} value={k}>
+							{KIND_LABEL[k]}
+						</option>
+					))}
+				</select>
+				<input className="wp-input wp-grow" value={f.tags} placeholder="tags, comma separated" onChange={(x) => setF({ ...f, tags: x.target.value })} aria-label="Tags" />
+			</div>
+			<input className="wp-input" value={f.rootCause} placeholder="Root cause" onChange={(x) => setF({ ...f, rootCause: x.target.value })} aria-label="Root cause" />
+			<textarea className="wp-textarea" rows={2} value={f.next} placeholder="Next actions, one per line" onChange={(x) => setF({ ...f, next: x.target.value })} aria-label="Next actions" />
+			<textarea className="wp-textarea" rows={4} value={f.body} placeholder="Details (Markdown)" onChange={(x) => setF({ ...f, body: x.target.value })} aria-label="Details" />
+			<div className="wp-row">
+				<button className="wp-btn wp-btn-sm wp-btn-primary" disabled={busy || !f.title.trim()} onClick={save}>
+					{busy ? 'Saving…' : 'Save changes'}
+				</button>
+				<button className="wp-btn wp-btn-sm wp-btn-ghost" onClick={onCancel}>
+					Cancel
+				</button>
+				<span className="wp-muted">Saved as a change any device applies; the original line is kept.</span>
+			</div>
+		</div>
+	)
+}
+
 function AddEntry({ ticket, project, onDone, onSaved }: { ticket?: string; project?: string; onDone: () => void; onSaved: () => void }) {
 	const personal = enabled('PERSONAL')
 	const [kind, setKind] = useState<EntryKind>('learning')
@@ -385,7 +484,7 @@ function AddEntry({ ticket, project, onDone, onSaved }: { ticket?: string; proje
 
 	const save = () =>
 		run(async () => {
-			await call('bridgeAdd', {
+			const got = await call('bridgeAdd', {
 				kind,
 				scope,
 				title,
@@ -394,6 +493,8 @@ function AddEntry({ ticket, project, onDone, onSaved }: { ticket?: string; proje
 				project: p.trim() || undefined,
 				rootCause: rootCause.trim() || undefined,
 			})
+			// Said before: point at it rather than add it twice.
+			if (got.duplicate) throw new Error(`Already in the Brain, from ${prettyDate(istDate(got.at))}: “${got.title}”. Edit that one instead.`)
 			onSaved()
 			onDone()
 		})

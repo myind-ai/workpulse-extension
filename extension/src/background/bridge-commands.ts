@@ -8,7 +8,7 @@
 // files whose sha moved are fetched. Writing is one commit to a file only this
 // browser writes, so nothing anybody else wrote can be overwritten.
 
-import { appendLine, changedFiles, devicesOf, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type Device, type InboxMessage, type Summary } from '@/core/bridge'
+import { appendLine, brainOf, changedFiles, devicesOf, duplicateOf, EDITABLE, entriesPath, inboxPath, newEntry, secretsIn, shortId, summarise, type BridgeEntry, type Device, type EditableField, type InboxMessage, type Summary } from '@/core/bridge'
 import { brainRecord, openWork, type OpenWork } from '@/core/brain-index'
 import { relatedTo } from '@/core/brain-query'
 import { dueForCheck, readRelease, RELEASES_API, UPDATE_CMD, type Release, type UpdateState } from '@/core/update'
@@ -37,7 +37,11 @@ export interface BridgeView {
 	queued: number
 	/** Where to pick up: the newest next action per ticket, last 30 days. */
 	open: OpenWork[]
+	/** Archived entries: out of every list, search and brief, kept for Restore. */
+	archived: BridgeEntry[]
 }
+
+
 
 const KEY = /\b([A-Z][A-Z0-9]{1,9})-(\d{1,6})\b/
 
@@ -72,9 +76,7 @@ export class BridgeCommands extends PageCommands {
 	async bridge(): Promise<BridgeView> {
 		const [s, token, rt, device] = await Promise.all([this.store.settings(), this.store.syncToken(), this.store.runtime(), this.device()])
 		const queue = rt.bridge?.queue ?? []
-		const live = fold(rt.bridge?.files ?? {})
-		const seen = new Set(live.map((e) => e.id))
-		const entries = [...queue.filter((e) => !seen.has(e.id)), ...live].sort((a, b) => b.at - a.at)
+		const entries = brainOf(rt)
 		return {
 			on: enabled('BRIDGE_SYNC'),
 			ready: !!parseRepo(s.syncRepo) && !!token,
@@ -89,6 +91,7 @@ export class BridgeCommands extends PageCommands {
 			summary: summarise(entries),
 			queued: queue.length,
 			open: openWork(entries, this.now() - 30 * 86_400_000),
+			archived: brainOf(rt, true).filter((e) => e.archived),
 		}
 	}
 
@@ -139,8 +142,8 @@ export class BridgeCommands extends PageCommands {
 			texts[path] = appendLine(texts[path] ?? (await gh.read(path))?.text ?? null, entry)
 		}
 		const first = entries[0]
-		const message = entries.length === 1 ? `bridge: ${first.kind} — ${first.title.slice(0, 60)}` : `bridge: ${entries.length} entries`
-		await gh.commit([...Object.entries(texts).map(([path, content]) => ({ path, content })), ...entries.map(brainRecord)], message)
+		const message = entries.length === 1 ? `bridge: ${first.amends ? `${first.state ?? 'edit'} ${shortId(first.amends)}` : first.kind} — ${first.title.slice(0, 60)}` : `bridge: ${entries.length} entries`
+		await gh.commit([...Object.entries(texts).map(([path, content]) => ({ path, content })), ...entries.filter((e) => !e.amends).map(brainRecord)], message)
 		const sent = new Set(entries.map((e) => e.id))
 		// What was written is what is known: show it now, rather than after the
 		// next poll. The ETag goes, so that poll does look.
@@ -167,10 +170,17 @@ export class BridgeCommands extends PageCommands {
 	 * One entry from this browser. Saving never waits on being connected: with
 	 * no repository yet, or no network, it is kept here and sent on the next sync.
 	 */
-	async bridgeAdd(input: Omit<BridgeEntry, 'schema' | 'id' | 'at' | 'device' | 'tags'> & { tags?: string[] }): Promise<BridgeEntry & { queued?: boolean }> {
+	async bridgeAdd(input: Omit<BridgeEntry, 'schema' | 'id' | 'at' | 'device' | 'tags'> & { tags?: string[] }): Promise<BridgeEntry & { queued?: boolean; duplicate?: boolean }> {
 		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')
 		if (input.scope === 'personal' && !enabled('PERSONAL')) throw new Error('Personal entries are switched off in this build (WXT_FEATURE_PERSONAL).')
-		const entry = newEntry(input, await this.device(), this.now())
+		// The same thing said twice is noise in every brief: say where it already is.
+		const same = !input.amends && duplicateOf(brainOf(await this.store.runtime()), input.kind, input.title, input.ticket)
+		if (same) return { ...same, duplicate: true }
+		return this.commitOrQueue(newEntry(input, await this.device(), this.now()))
+	}
+
+	/** Sent now when it can be, kept here (and sent on the next sync) when it cannot. */
+	private async commitOrQueue(entry: BridgeEntry): Promise<BridgeEntry & { queued?: boolean }> {
 		const gh = await this.bridgeGithub()
 		if (!gh) {
 			await this.enqueue(entry)
@@ -186,11 +196,28 @@ export class BridgeCommands extends PageCommands {
 	}
 
 	/**
+	 * Edit, archive, restore or delete an entry — any entry, from any device. It
+	 * is one more line in this browser's own file (a change record), which every
+	 * reader applies; nobody's file is rewritten, so nothing can conflict.
+	 * Delete hides it everywhere; the line it hides stays in the repository's
+	 * history (`wp-brain rm --purge` removes a terminal's own lines for good).
+	 */
+	async bridgeAmend(id: string, change: { set?: Partial<Pick<BridgeEntry, EditableField>>; state?: 'archived' | 'active' | 'deleted' }): Promise<BridgeEntry & { queued?: boolean }> {
+		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')
+		const target = brainOf(await this.store.runtime(), true).find((e) => e.id === id)
+		if (!target) throw new Error('That entry is not here any more. Sync, then try again.')
+		const set = change.set ? Object.fromEntries(Object.entries(change.set).filter(([k]) => (EDITABLE as readonly string[]).includes(k))) : undefined
+		if (set && 'title' in set && !String(set.title ?? '').trim()) throw new Error('A title cannot be empty.')
+		if (!change.state && !(set && Object.keys(set).length)) throw new Error('Nothing to change.')
+		return this.commitOrQueue(newEntry({ kind: target.kind, scope: target.scope, title: target.title, amends: target.id, ...(change.state ? { state: change.state } : {}), ...(set && Object.keys(set).length ? { set } : {}) }, await this.device(), this.now()))
+	}
+
+	/**
 	 * Save context: what you are doing, why, and what comes next, from any page.
 	 * The ticket comes from the words or the page when it is not given, and the
 	 * page itself goes in as a link.
 	 */
-	async saveContext(input: ContextInput): Promise<BridgeEntry & { queued?: boolean }> {
+	async saveContext(input: ContextInput): Promise<BridgeEntry & { queued?: boolean; duplicate?: boolean }> {
 		const title = input.title.trim()
 		if (title.length < 2) throw new Error('Give it a title first.')
 		const ticket = (input.ticket || title.match(KEY)?.[0] || input.page?.title.match(KEY)?.[0] || input.page?.url.match(KEY)?.[0])?.toUpperCase()
