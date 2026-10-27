@@ -17,6 +17,7 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
 | `cli/wp-brain.mjs` | A dependency-free Node CLI that reads and writes the same repository as the extension |
 | `skills/workpulse-brain/` | A Claude Code skill that uses the CLI: a brief before each ticket, a record after |
 | `.claude-plugin/`, `hooks/` | The Claude Code plugin: the skill plus the brief and record hooks, installed with `/plugin install` |
+| `plugins/jira-ticket-update/` | A second plugin: comments on and moves Jira tickets on a commit, a PR or the end of a session, always asking first ([explainer](docs/guides/jira-ticket-update-setup.md)) |
 | `src-tauri/fixtures/` | Sample Zoho People API responses (fake values) the extension tests parse |
 | `assets/tick/` | The masters of Tick, the cat, 20 six-second clips. `extension/scripts/build-art.mjs` makes the shipped versions |
 
@@ -51,6 +52,16 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
    (Contents: Read and write, 90 days). Pick only your Brain repository, paste the token, and press **Back up now**.
 
 Full guide, older Claude Code, Windows, and fixes: [docs/guides/connect-extension-and-claude-code.md](docs/guides/connect-extension-and-claude-code.md).
+
+**Optional: keep Jira tickets up to date.** This one works on its own, with no extension needed:
+
+```text
+/plugin install jira-ticket-update --marketplace myind-ai/workpulse-extension
+```
+
+Then `/mcp` → **atlassian** → sign in. When you open a PR, Claude offers the comment and the status move and
+asks before writing anything. One person per team says *"set up jira ticket updates"* and commits the file it
+writes. See [the explainer](docs/guides/jira-ticket-update-setup.md).
 
 ## Install from source
 

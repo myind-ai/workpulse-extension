@@ -7,6 +7,11 @@
       "name": "workpulse-brain",
       "source": "./",
       "description": "Brief before a ticket, record after a commit, in a private GitHub repo shared with the WorkPulse extension."
+    },
+    {
+      "name": "jira-ticket-update",
+      "source": "./plugins/jira-ticket-update",
+      "description": "Comment on and move Jira tickets on commit, PR or session end, always asking first, through the Atlassian MCP."
     }
   ]
 }
