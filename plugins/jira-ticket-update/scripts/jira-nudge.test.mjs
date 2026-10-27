@@ -1,12 +1,12 @@
 // node --test plugins/jira-ticket-update/scripts/
 import assert from 'node:assert/strict'
 import { execFileSync, execSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { eventOf, keysIn } from './jira-nudge.mjs'
+import { eventOf, guessMoves, keysIn, prefixesFrom } from './jira-nudge.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./jira-nudge.mjs', import.meta.url))
 const run = (args, input, env) =>
@@ -50,6 +50,53 @@ test('flow: silent commit, PR speaks, stop asks once, clear empties, team prefix
 
 	run(['clear', 'LEAP-7'], null, env)
 	assert.equal(run(['list'], null, env), '{}')
+})
+
+test('prefixes: from history and branches, only when two tickets share one', () => {
+	assert.deepEqual(prefixesFrom('PAY-1 fix\nPAY-2 retry\nPAY-2 again\nLEAP-9 once\nUTF-8 HEAD-1 HEAD-2'), [{ prefix: 'PAY', tickets: 2 }])
+})
+
+test('guess: a usual workflow maps every event, backwards moves never count', () => {
+	const moves = guessMoves(['Reopen', 'Back to To Do', 'Start Progress', 'Code Review', 'Ready for QA', 'Done', 'Cancel'])
+	assert.deepEqual(moves, { started: 'Start Progress', pr_opened: 'Code Review', pr_merged: 'Ready for QA', deployed_stage: 'Ready for QA', done: 'Done' })
+	assert.deepEqual(guessMoves(['In Progress', 'In Review', 'Deployed to Staging', 'Closed']), { started: 'In Progress', pr_opened: 'In Review', deployed_stage: 'Deployed to Staging', done: 'Closed' })
+	assert.deepEqual(guessMoves(['Block', 'Reject']), {})
+})
+
+test('save: team file merges per prefix and keeps what was there', () => {
+	const data = mkdtempSync(join(tmpdir(), 'jtu-data-'))
+	const repo = mkdtempSync(join(tmpdir(), 'jtu-repo-'))
+	execSync('git init -q', { cwd: repo })
+	const env = { CLAUDE_PLUGIN_DATA: data }
+	const saveIn = (where, v) => execFileSync('node', [SCRIPT, 'save', where, JSON.stringify(v)], { cwd: repo, env: { ...process.env, ...env } }).toString()
+	saveIn('team', { site: 'https://x.atlassian.net', prefixes: ['PAY'], projects: { PAY: { moves: { started: 'In Progress' } } } })
+	saveIn('team', { prefixes: ['LEAP'], projects: { PAY: { moves: { done: 'Done' } } } })
+	const team = JSON.parse(readFileSync(join(repo, '.claude', 'jira-ticket-update.json'), 'utf8'))
+	assert.deepEqual(team.prefixes, ['PAY', 'LEAP'])
+	assert.deepEqual(team.projects.PAY.moves, { started: 'In Progress', done: 'Done' })
+	assert.equal(team.site, 'https://x.atlassian.net')
+	saveIn('personal', { cloudId: 'abc' })
+	assert.equal(JSON.parse(readFileSync(join(data, 'config.json'), 'utf8')).cloudId, 'abc')
+	assert.throws(() => execFileSync('node', [SCRIPT, 'save', 'team', '{}'], { cwd: tmpdir(), env: { ...process.env, ...env }, stdio: 'pipe' }))
+})
+
+test('start: offers setup once in a repo with ticket keys and no settings, never again', () => {
+	const data = mkdtempSync(join(tmpdir(), 'jtu-data-'))
+	const repo = mkdtempSync(join(tmpdir(), 'jtu-repo-'))
+	const env = { CLAUDE_PLUGIN_DATA: data }
+	const sh = c => execSync(c, { cwd: repo, stdio: 'ignore' })
+	sh('git init -q && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m "PAY-1 one" && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m "PAY-2 two"')
+	sh('git branch feature/PAY-7-retry')
+	const first = JSON.parse(run(['start'], { cwd: repo }, env))
+	assert.match(first.hookSpecificOutput.additionalContext, /PAY \(3 tickets\)/, 'commits and branch names both count')
+	assert.equal(run(['start'], { cwd: repo }, env), '')
+
+	const set = mkdtempSync(join(tmpdir(), 'jtu-repo-'))
+	execSync('git init -q && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m "PAY-1" && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m "PAY-2"', { cwd: set })
+	mkdirSync(join(set, '.claude'))
+	writeFileSync(join(set, '.claude', 'jira-ticket-update.json'), '{"prefixes":["PAY"]}')
+	assert.equal(run(['start'], { cwd: set }, env), '', 'already set up: silent')
+	assert.equal(run(['start'], { cwd: tmpdir() }, env), '', 'not a repo: silent')
 })
 
 test('never breaks the session: bad input and unknown commands exit quietly', () => {

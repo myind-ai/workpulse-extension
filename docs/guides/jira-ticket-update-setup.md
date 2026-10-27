@@ -7,7 +7,7 @@ troubleshooting. Share this file with anyone who'll use it.
 Related: plugin source [`plugins/jira-ticket-update/`](../../plugins/jira-ticket-update/) ·
 [plugin README](../../plugins/jira-ticket-update/README.md)
 
-> **State, 2026-10-27:** released as **v0.1.0** in the public `workpulse` marketplace
+> **State, 2026-10-27:** **v0.2.0** (setup offered automatically, one question, works before any setup); v0.1.0 released in the public `workpulse` marketplace
 > ([release](https://github.com/myind-ai/workpulse-extension/releases/tag/jira-ticket-update-v0.1.0)). Checked:
 > 4 script tests pass and `claude plugin validate` passes for the plugin and the marketplace.
 > **Not yet run against a live Jira**, so tell us what the first real update does.
@@ -63,9 +63,9 @@ flowchart LR
 
 | Piece | Job | Talks to Jira? |
 |---|---|---|
-| **Hook script** `jira-nudge.mjs` | Spots commits and PRs on a ticket branch or message; reminds Claude at the right moment | **No** |
+| **Hook script** `jira-nudge.mjs` | Spots commits and PRs on a ticket branch or message; reminds Claude at the right moment; offers setup once in a repo that needs it | **No** |
 | **Skill** `jira-ticket-update:update` | Reads the ticket, gathers facts, drafts the comment and move, asks, then does it | Yes, after your yes |
-| **Skill** `jira-ticket-update:setup` | One-time: site, prefixes, which transition means what | Reads only |
+| **Skill** `jira-ticket-update:setup` | One question: site, prefixes and which transition means what, all detected or guessed | Reads only |
 | **Atlassian MCP server** | Your own Atlassian login (OAuth in the browser); no token to create | It's the Jira access |
 | **Team file** `.claude/jira-ticket-update.json` | Prefixes and status mapping, committed once | n/a |
 
@@ -165,38 +165,46 @@ claude  › Commented and moved. Jira now shows PAY-2433: Code Review.
    Pick **atlassian** and approve it in the browser with your Atlassian account. If you already use the
    **claude.ai Atlassian** connector, that works too; the plugin uses whichever is signed in.
 
-3. **Done**, if your team has already committed the team file. Otherwise one person does the team step below.
+3. **Done. Just work.** No setup is needed to start:
+   - in a repo whose history uses ticket keys and has no settings yet, Claude offers the one-question setup
+     **itself**, once, after your first request;
+   - or skip it: at your first PR, Claude guesses the right status from your workflow's names, asks once, and
+     remembers your answer.
 
 Nothing goes in `settings.json` by hand: the hooks, skills and MCP server come with the plugin.
 
-### The team: one person, once
+### The team: one person, one question
 
-1. In the repo, say:
+When Claude offers it (or you say **"set up jira ticket updates"**), it works everything out without asking:
+- the Jira site (it asks only if you have several);
+- the ticket prefixes, from the repo's commits and branches (`PAY`, 14 tickets);
+- which real transition means **started**, **PR opened**, **PR merged**, **on stage** and **done**, guessed from
+  your workflow's names (*Code Review*, *Ready for QA* …). It never skips backwards moves like *Reopen* or *Block*
+  silently; it just never picks them.
 
-   ```
-   set up jira ticket updates
-   ```
+Then **one question** shows the whole proposal:
 
-2. Claude:
-   - finds your Jira site (asks if you have several);
-   - suggests ticket prefixes from the repo's history (`PAY`, `LEAP`, …) for you to confirm;
-   - reads one ticket's real transitions per prefix and asks which one means **started**, **PR opened**, **PR
-     merged**, **on stage** and **done** (options are your workflow's real names, plus "not used");
-   - writes `.claude/jira-ticket-update.json`.
-3. Commit that file. Every teammate now gets the mapping with `git pull`.
-4. Optional: have Claude Code offer the plugin to anyone who opens the repo, by committing this in the repo's
-   `.claude/settings.json`:
+| Choice | What it writes |
+|---|---|
+| **Save for the team + offer the plugin to teammates** (recommended) | `.claude/jira-ticket-update.json` and the repo's `.claude/settings.json` block below, committed |
+| Save for the team | the team file only |
+| Just for me | your personal file, with no repo changes |
+| Change something | asks only about the part you name |
 
-   ```json
-   {
-     "extraKnownMarketplaces": {
-       "workpulse": { "source": { "source": "github", "repo": "myind-ai/workpulse-extension" } }
-     },
-     "enabledPlugins": { "jira-ticket-update@workpulse": true }
-   }
-   ```
+With the recommended choice, a teammate who opens the repo is offered the plugin by Claude Code (after trusting
+the folder), already set up. They only sign in with `/mcp`. The block it adds to the repo's `.claude/settings.json`:
 
-   Teammates are asked to trust the folder first, then to install.
+```json
+{
+  "extraKnownMarketplaces": {
+    "workpulse": { "source": { "source": "github", "repo": "myind-ai/workpulse-extension" } }
+  },
+  "enabledPlugins": { "jira-ticket-update@workpulse": true }
+}
+```
+
+**Clicks, end to end:** the first person installs (1 command), signs in (`/mcp`, then approve in the browser),
+answers 1 question, and commits. Each teammate accepts the plugin and signs in.
 
 ### Another machine of yours
 
@@ -320,8 +328,8 @@ WorkPulse-extension side, still being planned.
 |---|---|
 | `.claude-plugin/plugin.json` | Name, version, description, privacy link |
 | `.mcp.json` | The Atlassian MCP server (`https://mcp.atlassian.com/v1/mcp/authv2`) |
-| `hooks/hooks.json` | PostToolUse (Bash) and Stop hooks → `scripts/jira-nudge.mjs` |
-| `scripts/jira-nudge.mjs` | Spots commits and PRs, keeps the pending list, reads settings. Never calls Jira |
+| `hooks/hooks.json` | SessionStart (offer setup once), PostToolUse (Bash) and Stop hooks → `scripts/jira-nudge.mjs` |
+| `scripts/jira-nudge.mjs` | Spots commits and PRs, keeps the pending list, detects prefixes, guesses the status mapping, reads and writes settings. Never calls Jira |
 | `scripts/jira-nudge.test.mjs` | `node --test plugins/jira-ticket-update/scripts/jira-nudge.test.mjs` |
 | `skills/update/SKILL.md` | The ask → comment → move flow |
 | `skills/setup/SKILL.md` | One-time team setup |
@@ -340,3 +348,4 @@ latest release as the extension's version.
   (`~/.claude/skills/jira-ticket-update/`). It's now the full explainer for the plugin, which bundles the hooks,
   skills and MCP server, with team settings in a committed repo file. The personal copy is superseded.
 - **2026-10-27:** released v0.1.0 to the public marketplace.
+- **2026-10-27, 0.2.0:** setup went from 5–7 questions to one. Prefixes are detected and the status mapping is guessed, setup is offered automatically once per repo, updates work before any setup (guess, ask once, remember), the script writes the settings, and the recommended choice also makes the repo offer the plugin to teammates.

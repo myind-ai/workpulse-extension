@@ -168,7 +168,9 @@ export const DEFAULT_SETTINGS: Settings = {
 	breatheEvery: 0,
 	ticketPrefixes: [],
 	syncRepo: '',
-	syncBranch: '',
+	// The CLI's default too, so a new install and `wp-brain setup` agree with nothing typed. Saved settings
+	// always carry the key (it is as old as syncRepo), so this reaches fresh installs only.
+	syncBranch: 'brain',
 	syncPath: 'workpulse',
 	syncDaily: true,
 	syncAfter: '19:00',

@@ -19,10 +19,13 @@ const FIX_LABEL: Record<NonNullable<Step['fix']>, string> = {
 
 export function Ready({ always }: { always?: boolean }) {
 	const { data, reload } = useLive(() => call('readiness'))
+	// Setup opens on this page and used to stop here: nothing said there was a next step.
+	const { data: backup } = useLive(() => call('syncState'))
 	const { busy, error, run } = useAction()
 	if (!data) return null
+	const allOk = data.ready && data.steps.every((s) => s.ok)
 	// On the dashboard this is only in the way once everything works.
-	if (!always && data.ready && data.steps.every((s) => s.ok)) return null
+	if (!always && allOk) return null
 
 	const press = (fix: Step['fix']) =>
 		run(async () => {
@@ -70,6 +73,17 @@ export function Ready({ always }: { always?: boolean }) {
 					WorkPulse reads the Zoho People page you are already signed into — it never asks for your password, and nothing is sent anywhere. Keep that tab open and press{' '}
 					<strong>Check now</strong>.
 				</span>
+			)}
+			{/* Only until the first backup: after that it is not a next step, it is done. */}
+			{allOk && backup && backup.at == null && (
+				<div className="wp-banner">
+					<span className="wp-grow wp-small">
+						<strong>Next:</strong> keep a copy in your own GitHub repository, and let Claude Code read and add to it. About two minutes.
+					</span>
+					<a className="wp-btn wp-btn-sm wp-btn-primary" href="#/settings/backup">
+						Back up and connect →
+					</a>
+				</div>
 			)}
 			{error && <div className="wp-error wp-small">{error}</div>}
 		</section>

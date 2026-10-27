@@ -20,8 +20,8 @@ node "$NUDGE" clear KEY   # after updating, or when the user says not now
 
 ## 0. Ready?
 
-- **Settings:** `node "$NUDGE" config`. If `prefixes` is empty and `projects` has nothing for this ticket's
-  prefix, run the **`jira-ticket-update:setup`** skill first (a minute, once per team).
+- **Settings:** `node "$NUDGE" config`. **No setup is needed to start.** If this ticket's prefix has no moves, do
+  step 3's *no mapping* path: guess, ask once, save. Don't send the user off to a separate setup first.
 - **Jira tools:** `ToolSearch "jira transition"`. The server prefix varies: this plugin's `atlassian` server,
   the claude.ai Atlassian connector, or another install. Use whichever has the **real** tools. If you only find
   `authenticate` tools, tell the user to run `/mcp`, pick the Atlassian server and sign in, then carry on
@@ -56,8 +56,11 @@ can't find one, ask. Never guess.
    tests that ran *in this session* and their result, stage links the user gave.
 3. **Pick the move:** `projects.<PREFIX>.moves[event]` from the config. Events are `started`, `pr_opened`,
    `pr_merged`, `deployed_stage` and `done`. Check it against `getTransitionsForJiraIssue` **from the current
-   status**. If it isn't available, offer the ones that are. If the event has no mapping, ask (options = the real
-   transition names) and offer to save the answer with `setup`.
+   status**. If it isn't available, offer the ones that are.
+   **No mapping for this prefix yet:** run `node "$NUDGE" guess "<the transition names>"` and use the guess for this
+   event in step 5's question (*"Comment + move to Code Review"*). After the user answers, save what they picked
+   without asking again: `node "$NUDGE" save personal '{"prefixes":["PAY"],"projects":{"PAY":{"moves":{"pr_opened":"Code Review"}}}}'`.
+   Then mention once: *"Say 'set up jira ticket updates' to save this for the whole team."*
 4. **Draft the comment** (plus `commentFooter` from the config, if set):
 
    ```

@@ -27,17 +27,18 @@ login ([Atlassian privacy policy](https://www.atlassian.com/legal/privacy-policy
 Then `/mcp` → **atlassian** → sign in with your Atlassian account (OAuth; no token to create or paste).
 If you already use the claude.ai Atlassian connector, that works too.
 
-That's it. The hooks, the skills and the Atlassian MCP server come with the plugin. Nothing goes in
-`settings.json` by hand.
+That's it. Just work: in a repo that uses ticket keys, Claude offers the one-question setup itself, and at
+your first PR it guesses the right status move and asks once. The hooks, the skills and the Atlassian MCP server
+come with the plugin. Nothing goes in `settings.json` by hand.
 
 ## Team setup (one person, once)
 
-Say **"set up jira ticket updates"** in the repo. Claude finds your Jira site, asks the ticket prefixes and
-which real transition means *started / PR opened / PR merged / on stage / done*, and writes
-`.claude/jira-ticket-update.json`. Commit that file: every teammate gets the mapping with `git pull`.
+When Claude offers setup (or you say **"set up jira ticket updates"**), it detects the site and prefixes, guesses
+which real transition means *started / PR opened / PR merged / on stage / done*, and asks **one** question. The
+recommended answer writes and commits `.claude/jira-ticket-update.json` plus the block below, so every teammate who
+opens the repo is offered the plugin already set up and only signs in.
 
-To have Claude Code offer the plugin to everyone who opens the repo, also commit this in the repo's
-`.claude/settings.json`:
+The block it adds to the repo's `.claude/settings.json`:
 
 ```json
 {

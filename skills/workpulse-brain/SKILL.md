@@ -26,13 +26,15 @@ How to connect everything: `docs/guides/connect-extension-and-claude-code.md` in
 
 Run `node $WP doctor` the first time this skill is used in a session (it is fast and changes nothing).
 If it reports **Config missing**, or the SessionStart context says the plugin "is installed but not linked",
-or the user asks to set up / re-link / change the Brain, **ask before doing anything**, with AskUserQuestion
-(one call):
+or the user asks to set up / re-link / change the Brain, **ask before doing anything**, with **one** question
+(AskUserQuestion):
 
 | Question | Options (first is recommended) |
 |---|---|
-| Where should the Brain live? | **A new private repo `<gh login>/workpulse-notes`** (the extension's default) · A `brain` branch of an existing private repo (name it) · Another repo (name it) · Not now |
-| This machine's name in the Brain | **cli-<hostname>** (default) · Other |
+| Where should the Brain live? | **A new private repo `<gh login>/workpulse-notes`** (the extension's default) · An existing private repo (name it) · Not now |
+
+Always use branch **`brain`**: it is the extension's default from 1.6.0, so the two sides match with nothing to
+type. The machine's name defaults to `cli-<hostname>`; say it in the result, and change it only if asked.
 
 Get `<gh login>` with `gh api user --jq .login`. If `gh` is missing or not signed in, say so and stop: the
 user runs `! gh auth login` (an interactive login), then ask again.
@@ -42,8 +44,8 @@ plugin, so nothing in `~/.claude` needs editing. Link it yourself — this only 
 and `~/.workpulse/`, and creates the repository private when it doesn't exist:
 
 ```bash
-node "$WP" init owner/workpulse-notes --create --steps                    # a new or separate repo
-node "$WP" init owner/existing-repo --branch brain --create --steps       # a branch of an existing repo
+node "$WP" init owner/workpulse-notes --branch brain --create --steps     # a new repo (created private)
+node "$WP" init owner/existing-repo --branch brain --steps                # an existing repo
 ```
 
 Then show the user the browser steps it printed (branch, the **pre-filled token link**, Back up now) and run
@@ -54,7 +56,7 @@ Then show the user the browser steps it printed (branch, the **pre-filled token 
 command. On a machine without the CLI, the one-line installer does it all:
 
 ```bash
-! node "$WP" setup --repo owner/repo --branch brain --create yes --brief yes --record yes --rule yes --skill yes
+! node "$WP" setup --repo owner/repo --yes
 ! curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo owner/workpulse-notes
 ```
 
@@ -65,6 +67,9 @@ Afterwards run `node $WP doctor` and read it back: every ✓/!/✗ line, and wha
 re-run any time; it replaces its own hooks and rule and never touches anything else, and it keeps
 `.wp-brain.bak` copies. The GitHub token is only ever pasted into the extension (fine-grained, Contents:
 Read and write, that one repository, with an expiry). The CLI uses the user's own `gh`/git login and stores no token.
+
+Whether this machine is already linked, and to which repository and branch, is in `~/.config/workpulse/brain.json`;
+`node $WP doctor` reads it out.
 
 If the session already began with a "WorkPulse Brain — what was recorded before…" block (the SessionStart hook,
 `node $WP hook`), that is the brief: read it and skip step 2 below.

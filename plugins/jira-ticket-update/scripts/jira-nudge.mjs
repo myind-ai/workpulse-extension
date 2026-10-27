@@ -1,12 +1,16 @@
 #!/usr/bin/env node
-// Trigger side of the jira-ticket-update plugin. It never talks to Jira: it only notices
-// work that should move a ticket (commit, PR opened, PR merged) and reminds Claude to ASK.
+// Trigger and settings side of the jira-ticket-update plugin. It never talks to Jira: it notices work that
+// should move a ticket (commit, PR opened, PR merged), reminds Claude to ASK, and reads/writes the settings.
 //
-//   node jira-nudge.mjs post         PostToolUse(Bash) hook: record commit / PR events per ticket key
-//   node jira-nudge.mjs stop         Stop hook: once per session, ask to update tickets with unreported work
-//   node jira-nudge.mjs clear KEY    after the ticket was updated (or the user said not now)
-//   node jira-nudge.mjs list         what is pending
-//   node jira-nudge.mjs config [DIR] the settings that apply in DIR (team file over personal file), as JSON
+//   node jira-nudge.mjs start            SessionStart hook: offer setup once in a repo that uses ticket keys but has no settings
+//   node jira-nudge.mjs post             PostToolUse(Bash) hook: record commit / PR events per ticket key
+//   node jira-nudge.mjs stop             Stop hook: once per session, ask to update tickets with unreported work
+//   node jira-nudge.mjs clear KEY        after the ticket was updated (or the user said not now)
+//   node jira-nudge.mjs list             what is pending
+//   node jira-nudge.mjs config [DIR]     the settings that apply in DIR (team file over personal file), as JSON
+//   node jira-nudge.mjs prefixes [DIR]   ticket prefixes this repo's history and branches use, most used first
+//   node jira-nudge.mjs guess 'A,B,C'    a status mapping guessed from a workflow's transition names
+//   node jira-nudge.mjs save team|personal '<json>'   merge settings into the team file or your personal file
 //
 // Settings, most specific first, merged:
 //   <repo>/.claude/jira-ticket-update.json   team: committed once, every teammate gets it with git pull
@@ -16,19 +20,22 @@
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const PERSONAL = process.env.CLAUDE_PLUGIN_DATA || join(homedir(), '.claude', 'jira-ticket-update')
 const STATE = join(PERSONAL, 'pending.json')
+const OFFERED = join(PERSONAL, 'offered.json')
 const TEAM_FILE = join('.claude', 'jira-ticket-update.json')
-const NOT_KEYS = new Set(['UTF', 'SHA', 'ISO', 'RFC', 'HTTP', 'TLS', 'SSL', 'CVE', 'ES', 'MP', 'H', 'X', 'GPT', 'ECMA', 'WCAG', 'COVID'])
+const NOT_KEYS = new Set(['UTF', 'SHA', 'ISO', 'RFC', 'HTTP', 'TLS', 'SSL', 'CVE', 'ES', 'MP', 'H', 'X', 'GPT', 'ECMA', 'WCAG', 'COVID', 'HEAD', 'V', 'PR', 'WIP'])
+export const EVENTS = ['started', 'pr_opened', 'pr_merged', 'deployed_stage', 'done']
 
 const readJson = (p, fallback) => { try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return fallback } }
-const saveState = s => { mkdirSync(PERSONAL, { recursive: true }); writeFileSync(STATE, JSON.stringify(s, null, 2)) }
+const writeJson = (p, v) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`) }
+const saveState = s => writeJson(STATE, s)
 const stdin = () => { try { return JSON.parse(readFileSync(0, 'utf8') || '{}') } catch { return {} } }
 
 function git(cwd, args) {
-	try { return execSync(`git ${args}`, { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() }
+	try { return execSync(`git ${args}`, { cwd, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 << 20 }).toString().trim() }
 	catch { return '' }
 }
 
@@ -41,7 +48,7 @@ export function configFor(cwd) {
 		cloudId: team?.cloudId || mine.cloudId || '',
 		prefixes: [...new Set([...(team?.prefixes || []), ...(mine.prefixes || [])])],
 		projects: { ...(mine.projects || {}), ...(team?.projects || {}) },
-		sources: { team: team ? join(root, TEAM_FILE) : null, personal: join(PERSONAL, 'config.json') },
+		sources: { team: root ? join(root, TEAM_FILE) : null, teamExists: !!team, personal: join(PERSONAL, 'config.json') },
 	}
 }
 
@@ -52,12 +59,100 @@ export function keysIn(text, prefixes = []) {
 	return [...new Set(found)]
 }
 
+// Prefixes from what the repo already says: commit messages and branch names. A prefix must name at least
+// two different tickets, so one stray "ABC-1" in a message isn't mistaken for a project.
+export function prefixesFrom(text) {
+	const tickets = new Map()
+	for (const key of keysIn(text)) {
+		const p = key.split('-')[0]
+		tickets.set(p, (tickets.get(p) || new Set()).add(key))
+	}
+	return [...tickets].filter(([, s]) => s.size >= 2).sort((a, b) => b[1].size - a[1].size).map(([p, s]) => ({ prefix: p, tickets: s.size }))
+}
+
+export function repoPrefixes(cwd) {
+	// Quoted: unquoted, the shell reads %(refname:short)'s parentheses as syntax, git never runs, and branches go uncounted.
+	const text = `${git(cwd, 'log -400 --format=%s%n%b')}\n${git(cwd, "branch -a '--format=%(refname:short)'")}`
+	return prefixesFrom(text)
+}
+
+// A first guess at which transition means what, from the names alone. Setup shows it for one "use these?";
+// nothing is written to Jira from a guess.
+const BACKWARDS = /reopen|back to|block|cancel|won'?t|reject|declin|on hold|stop/i
+const WANTS = {
+	started: [/^in progress$/i, /start|progress|doing|develop|working/i],
+	pr_opened: [/code review/i, /review|pull request|\bpr\b/i],
+	pr_merged: [/ready for (qa|test)/i, /merged|qa|test|verif/i],
+	deployed_stage: [/stag|uat/i, /ready for (qa|test)|qa|test/i],
+	done: [/^done$/i, /done|close|resolve|complete|release|ship/i],
+}
+export function guessMoves(names) {
+	const usable = names.map(n => n.trim()).filter(n => n && !BACKWARDS.test(n))
+	const moves = {}
+	for (const event of EVENTS) {
+		for (const re of WANTS[event]) {
+			const hit = usable.find(n => re.test(n))
+			if (hit) { moves[event] = hit; break }
+		}
+	}
+	return moves
+}
+
+function merge(base, add) {
+	const out = { ...base, ...add }
+	if (base.prefixes || add.prefixes) out.prefixes = [...new Set([...(base.prefixes || []), ...(add.prefixes || [])])]
+	if (base.projects || add.projects) {
+		out.projects = { ...(base.projects || {}) }
+		for (const [p, v] of Object.entries(add.projects || {})) {
+			const old = out.projects[p] || {}
+			out.projects[p] = { ...old, ...v, moves: { ...(old.moves || {}), ...(v.moves || {}) } }
+		}
+	}
+	return out
+}
+
+export function save(where, json, cwd) {
+	const add = typeof json === 'string' ? JSON.parse(json) : json
+	let file
+	if (where === 'team') {
+		const root = git(cwd, 'rev-parse --show-toplevel')
+		if (!root) throw new Error('not in a git repository: save personal instead')
+		file = join(root, TEAM_FILE)
+	} else if (where === 'personal') file = join(PERSONAL, 'config.json')
+	else throw new Error('save team|personal')
+	const next = merge(readJson(file, {}), add)
+	writeJson(file, next)
+	return file
+}
+
 // The rtk hook rewrites `git commit` to `rtk git commit`, so allow an optional prefix.
 export function eventOf(cmd) {
 	if (/(^|[;&|]\s*)(rtk\s+)?gh\s+pr\s+merge\b/.test(cmd)) return 'pr_merged'
 	if (/(^|[;&|]\s*)(rtk\s+)?gh\s+pr\s+create\b/.test(cmd)) return 'pr_opened'
 	if (/(^|[;&|]\s*)(rtk\s+)?git\s+commit\b/.test(cmd) && !/--dry-run/.test(cmd)) return 'commit'
 	return null
+}
+
+function start() {
+	const input = stdin()
+	const cwd = input.cwd || process.cwd()
+	const root = git(cwd, 'rev-parse --show-toplevel')
+	if (!root) return
+	const cfg = configFor(cwd)
+	if (cfg.prefixes.length || Object.keys(cfg.projects).length) return
+	const offered = readJson(OFFERED, {})
+	if (offered[root]) return
+	const found = repoPrefixes(cwd)
+	if (!found.length) return
+	offered[root] = new Date().toISOString()
+	writeJson(OFFERED, offered)
+	const seen = found.slice(0, 4).map(f => `${f.prefix} (${f.tickets} tickets)`).join(', ')
+	console.log(JSON.stringify({
+		hookSpecificOutput: {
+			hookEventName: 'SessionStart',
+			additionalContext: `This repo's history uses Jira ticket keys — ${seen} — but jira-ticket-update isn't set up here. When the user's first request is done (not before), offer once, in one line, the one-question setup (skill jira-ticket-update:setup). If they say no, drop it: it won't be offered again in this repo.`,
+		},
+	}))
 }
 
 function post() {
@@ -119,14 +214,20 @@ function clear(key) {
 	console.log(`cleared ${key}`)
 }
 
-const [mode, arg] = process.argv.slice(2)
+const [mode, arg, arg2] = process.argv.slice(2)
+const HOOKS = new Set(['start', 'post', 'stop'])
 try {
-	if (mode === 'post') post()
+	if (mode === 'start') start()
+	else if (mode === 'post') post()
 	else if (mode === 'stop') stop()
 	else if (mode === 'clear' && arg) clear(arg)
 	else if (mode === 'list') console.log(existsSync(STATE) ? readFileSync(STATE, 'utf8') : '{}')
 	else if (mode === 'config') console.log(JSON.stringify(configFor(arg || process.cwd()), null, 2))
-	else if (mode) console.error('usage: jira-nudge.mjs post | stop | clear KEY | list | config [DIR]')
-} catch {
-	// A reminder must never break the session it is reminding.
+	else if (mode === 'prefixes') console.log(JSON.stringify(repoPrefixes(arg || process.cwd())))
+	else if (mode === 'guess') console.log(JSON.stringify(guessMoves((arg || '').split(',')), null, 2))
+	else if (mode === 'save') console.log(`saved ${save(arg, arg2, process.cwd())}`)
+	else if (mode) console.error('usage: jira-nudge.mjs start | post | stop | clear KEY | list | config [DIR] | prefixes [DIR] | guess "A,B,C" | save team|personal JSON')
+} catch (e) {
+	// A hook must never break the session it is reminding; a command the skill runs should say what failed.
+	if (!HOOKS.has(mode)) { console.error(String(e?.message || e)); process.exitCode = 1 }
 }

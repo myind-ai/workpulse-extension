@@ -120,7 +120,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 					stored on this machine, separately from your settings — never shown again, never exported, never written into the backup, and only ever sent to api.github.com.
 				</li>
 				<li>
-					<strong>One commit a day, on your default branch.</strong> Not a branch and a merge per day — that would be 365 branches and 365 merge commits for no extra
+					<strong>One commit a day, on one branch (<code>brain</code> unless you change it).</strong> Not a branch and a merge per day — that would be 365 branches and 365 merge commits for no extra
 					information. The day-by-day record is a file per day in <code>days/</code>, so the repository reads as a diary without reading git history, and the commit message
 					carries the date and the day's note.
 				</li>
@@ -212,7 +212,18 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 						</p>
 						<div className="wp-row">
 							<input className="wp-input wp-sm" style={{ width: 180 }} value={name} onChange={(e) => setName(e.target.value.replace(/[^\w.-]/g, '-'))} aria-label="Repository name" />
-							<a className="wp-btn wp-btn-sm wp-btn-primary" href={newRepoUrl(name)} target="_blank" rel="noreferrer" onClick={() => setSaid('')}>
+							{/* Opening GitHub's form is taken as doing it: a separate "I've created it"
+							    was one more click with one answer. Step 3 checks against GitHub anyway. */}
+							<a
+								className="wp-btn wp-btn-sm wp-btn-primary"
+								href={newRepoUrl(name)}
+								target="_blank"
+								rel="noreferrer"
+								onClick={() => {
+									setMadeRepo(true)
+									setSaid('Press Create repository on GitHub, then make a token for it — step 2.')
+								}}
+							>
 								Create it on GitHub →
 							</a>
 							{step === 'repo' && (
@@ -220,10 +231,10 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 									className="wp-btn wp-btn-sm"
 									onClick={() => {
 										setMadeRepo(true)
-										setSaid('Now make a token for it — step 2.')
+										setSaid('Make a token for it — step 2.')
 									}}
 								>
-									I've created it
+									I already have one
 								</button>
 							)}
 						</div>
@@ -352,6 +363,9 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 							<span>
 								Branch: <code>{settings.syncBranch.trim() || 'the default branch'}</code>
 							</span>
+							{settings.syncBranch.trim() === 'brain' && (
+								<span className="wp-muted">— its own branch, so notes never land next to code; the same one Claude Code uses.</span>
+							)}
 							{!settings.syncBranch.trim() && (
 								<>
 									<span className="wp-muted">— if this repository also holds code, give your notes their own branch.</span>

@@ -63,7 +63,7 @@ export function ensureRepo({ repo, create, sh = run }) {
 export function extensionSteps({ repo, branch, tokenUrl }) {
 	return [
 		'Now the extension (Chrome → WorkPulse → Settings → Backup):',
-		`  1. Branch: ${branch || '(leave empty — the default branch)'}`,
+		`  1. Branch: ${branch || '(leave empty — the default branch)'}${branch === 'brain' ? ' (already the default from WorkPulse 1.6.0)' : ''}`,
 		`  2. Make a token — this page is pre-filled; pick only ${repo} under Repository access:`,
 		`     ${tokenUrl(repo.split('/')[0])}`,
 		`  3. Paste the token, pick ${repo}, press Back up now.`,
@@ -194,6 +194,20 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 	try {
 		console.log('Link Claude Code on this machine to the WorkPulse Brain. Enter keeps the [default].\n')
 		const login = opt.repo ? null : run('gh', ['api', 'user', '--jq', '.login'])
+		// Seven questions whose defaults are what almost everyone wants: say them once and take one Enter.
+		// `--yes` takes them without asking; "n" walks the seven as before. Flags given still win.
+		const device0 = `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`
+		const repo0 = opt.repo && opt.repo !== true ? String(opt.repo) : login ? `${login}/${repoName}` : ''
+		// --repo and --branch (what the extension's copy line passes) fill the summary; any other flag means
+		// the person is choosing for themselves, so they get the questions.
+		const branch0 = opt.branch && opt.branch !== true ? String(opt.branch) : 'brain'
+		const asked = ['device', 'brief', 'record', 'rule', 'skill', 'create'].some((k) => opt[k] !== undefined)
+		if (repo0 && !asked) {
+			console.log(`Recommended:\n  repository  ${repo0} (created private if it doesn't exist)\n  branch      ${branch0 === '-' ? 'the default branch' : branch0}\n  this machine ${device0}\n  hooks       brief at session start, ask once to record after a commit\n  also        the Brain rule in ~/.claude/CLAUDE.md and the workpulse-brain skill\n`)
+			const take = opt.yes || !rl || yes(await ask(rl, undefined, 'Use the recommended setup? (n = answer each question) Y/n', 'y'))
+			if (take) opt = { create: 'y', device: device0, brief: 'y', record: 'y', rule: 'y', skill: 'y', ...opt, repo: repo0, branch: branch0 }
+			console.log('')
+		}
 		const repo = await ask(rl, opt.repo, '1. Brain repository (owner/repo — the one set in the extension’s Settings → Backup; a new one is created private)', login ? `${login}/${repoName}` : '')
 		if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('A repository is needed, as owner/repo.')
 		if (!opt['no-push']) {

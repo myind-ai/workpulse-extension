@@ -316,8 +316,17 @@ export class GitHub {
 
 	private async commitOnce(files: CommitFile[], message: string): Promise<{ sha: string; files: number } | null> {
 		if (!files.length) return null
-		const branch = this.repo.branch?.trim() || (await this.check()).defaultBranch
+		const named = this.repo.branch?.trim()
+		const branch = named || (await this.check()).defaultBranch
 		let head = await this.ref(branch)
+
+		// A named branch that is not there yet — the `brain` branch beside a repository's
+		// code — starts empty, the way the CLI starts it: no shared history with the code.
+		// That needs a git database, so it is only possible once the repository has a commit.
+		if (!head && named) {
+			const main = await this.ref((await this.check()).defaultBranch)
+			if (main) return this.orphan(files, branch, message)
+		}
 
 		// A repository with no commits at all has no git database yet: the tree and
 		// commit endpoints answer 409 until something has been written. The contents
@@ -325,7 +334,16 @@ export class GitHub {
 		// and starts the history; everything after this is the normal path.
 		if (!head) {
 			const [first, ...rest] = files
-			await this.putFile(first.path, first.raw ? first.content : encode64(first.content), message, branch)
+			try {
+				await this.putFile(first.path, first.raw ? first.content : encode64(first.content), message, branch)
+			} catch (e) {
+				// GitHub may refuse to start an empty repository on a branch that does not
+				// exist. Then the repository starts on its own default branch with a line
+				// saying where the notes are, and the notes go to their branch as above.
+				if (!named || !(e instanceof GitHubError) || (e.status !== 404 && e.status !== 422)) throw e
+				await this.putFile('README.md', encode64(`# WorkPulse notes\n\nThe notes are on the \`${branch}\` branch.\n`), 'Start the repository', (await this.check()).defaultBranch)
+				return this.orphan(files, branch, message)
+			}
 			if (!rest.length) return { sha: '', files: 1 }
 			head = await this.ref(branch)
 			if (!head) throw new GitHubError(409, 'GitHub accepted the first file but the branch is still not there. Try again in a moment.')
@@ -334,18 +352,32 @@ export class GitHub {
 		return this.onto(head, files, branch, message)
 	}
 
-	/** One commit of these files on top of `head`. */
-	private async onto(head: { commitSha: string; treeSha: string }, files: CommitFile[], branch: string, message: string): Promise<{ sha: string; files: number }> {
+	/** The tree entries for these files. */
+	private entries(files: CommitFile[]) {
 		// Text goes inline, which creates the blob as part of the tree. Bytes
 		// cannot: a PNG inlined as a string would be mangled, so it becomes a
 		// base64 blob of its own first and the tree points at the sha.
-		const entries = await Promise.all(
+		return Promise.all(
 			files.map(async (f) => {
 				if (!f.raw) return { path: f.path, mode: '100644', type: 'blob', content: f.content }
 				const blob = (await this.call(`/repos/${this.where}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: f.content, encoding: 'base64' }) })) as { sha: string }
 				return { path: f.path, mode: '100644', type: 'blob', sha: blob.sha }
 			}),
 		)
+	}
+
+	/** A new branch holding only these files: a tree from nothing, a commit with no parent, then the ref. */
+	private async orphan(files: CommitFile[], branch: string, message: string): Promise<{ sha: string; files: number }> {
+		const tree = (await this.call(`/repos/${this.where}/git/trees`, { method: 'POST', body: JSON.stringify({ tree: await this.entries(files) }) })) as { sha: string }
+		const commit = (await this.call(`/repos/${this.where}/git/commits`, { method: 'POST', body: JSON.stringify({ message, tree: tree.sha, parents: [] }) })) as { sha: string }
+		// 422 here means someone made the branch a moment ago; commit() retries and builds on it.
+		await this.call(`/repos/${this.where}/git/refs`, { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }) })
+		return { sha: commit.sha, files: files.length }
+	}
+
+	/** One commit of these files on top of `head`. */
+	private async onto(head: { commitSha: string; treeSha: string }, files: CommitFile[], branch: string, message: string): Promise<{ sha: string; files: number }> {
+		const entries = await this.entries(files)
 		const tree = (await this.call(`/repos/${this.where}/git/trees`, {
 			method: 'POST',
 			body: JSON.stringify({ base_tree: head.treeSha, tree: entries }),

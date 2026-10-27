@@ -1,9 +1,14 @@
 # Connect the WorkPulse extension and Claude Code to one GitHub repository
 
-Updated: 2026-10-26 (plugin)
+Updated: 2026-10-27 (fewer steps: branch `brain` on both sides by default, one-answer setup)
 
 For anyone setting up WorkPulse from scratch: install the extension, link it to a private GitHub repository,
 and link Claude Code to the same repository, so that both read and write one shared Brain. It takes about 5 minutes.
+
+**The short version:** install the extension → Zoho setup opens by itself, and when it's green it says what's next →
+in Claude Code `/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension` and answer one
+question → in the extension, paste one token and press **Back up now**. Both sides use the `brain` branch
+without you typing it.
 Related: [README](../../README.md) · [skill](../../skills/workpulse-brain/SKILL.md) · [installer](../../install.sh) · [privacy](../PRIVACY.md)
 
 ## What you end up with
@@ -77,8 +82,9 @@ or you can say it yourself:
 Link my WorkPulse Brain to you/workpulse-notes
 ```
 
-Claude asks which repository to use, creates it as **private** if it doesn't exist, links this machine, and shows
-you step 3 with your token link filled in. The extension's **Settings → Claude Code & the Brain** panel shows both
+Claude asks **one** question (a new private `you/workpulse-notes`, or a repository you name), creates it as
+**private** if it doesn't exist, links this machine on the `brain` branch, and shows you step 3 with your token
+link filled in. The extension's **Settings → Claude Code & the Brain** panel shows both
 lines with your repository already filled in.
 
 ### Or: one terminal line (macOS / Linux), without the plugin
@@ -93,7 +99,8 @@ With an existing repository, or a `brain` branch of one:
 curl -fsSL https://raw.githubusercontent.com/myind-ai/workpulse-extension/main/install.sh | bash -s -- --repo you/workpulse-notes --branch brain
 ```
 
-What it does, asking before each part:
+What it does. It shows the recommended answers once, and **Enter** takes them all (`n` asks each one; `--yes`
+skips even that):
 
 1. Checks Node, git and `gh auth status`.
 2. Installs (or updates) the CLI and the skill in `~/workpulse-extension`.
@@ -110,14 +117,14 @@ Windows, or if you'd rather not pipe a script into bash:
 
 ```bash
 git clone https://github.com/myind-ai/workpulse-extension.git ~/workpulse-extension
-node ~/workpulse-extension/cli/wp-brain.mjs setup --repo you/workpulse-notes --branch brain
+node ~/workpulse-extension/cli/wp-brain.mjs setup --repo you/workpulse-notes --yes
 ```
 
 ## 3. Connect the extension
 
 In Chrome, open WorkPulse → **Settings → Backup**:
 
-1. **Branch**: the same one you gave setup (`brain`, or leave it empty for the default branch). Set this first.
+1. **Repository**: press **Create it on GitHub →** (one click on GitHub's own form), or **I already have one** if setup made it.
 2. **Make a token**: the button opens GitHub's token page with the name, **Contents: Read and write** and a 90-day expiry already filled in.
    You choose one thing: **Repository access → Only select repositories → your Brain repository**.
    Then click **Generate token**. The same pre-filled link is in setup's output:
@@ -126,9 +133,18 @@ In Chrome, open WorkPulse → **Settings → Backup**:
    https://github.com/settings/personal-access-tokens/new?name=WorkPulse+Brain&expires_in=90&contents=write
    ```
 
-3. Paste the token, pick the repository, and press **Back up now**. The first backup only runs when you press it.
+3. Paste the token (a token limited to one repository picks it by itself) and press **Back up now**. The first backup
+   only runs when you press it.
+
+The branch is already `brain`, the same as Claude Code's, so there is nothing to set. Extensions set up before 1.6.0
+keep the branch they had.
 
 The token is stored only in the extension. Never put it in a repository, an `.env` file, a chat, or a Brain entry.
+
+## Optional: keep Jira tickets up to date
+
+A separate plugin, no extension needed: `/plugin install jira-ticket-update --marketplace myind-ai/workpulse-extension`,
+then `/mcp` → atlassian → sign in. See [the explainer](jira-ticket-update-setup.md).
 
 ## 4. Check it
 
@@ -149,6 +165,9 @@ filled in with your repository.
 
 ## What changed
 
+- 2026-10-27 (1.6.0): fewer steps. The extension and setup both default to the `brain` branch (the "Branch: set this
+  first" step is gone), setup takes every recommended answer with one Enter, Claude asks one question instead of two,
+  opening GitHub's repository form counts as making it, and the Zoho page says what's next once it's green.
 - 2026-10-27: one-line install and update (`update.sh`), the in-extension update notice, and the Updating section.
 
 - 2026-10-26 (later): the Claude Code plugin is now the easiest way. It needs no settings edits, and Claude offers to link it.

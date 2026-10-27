@@ -1,7 +1,7 @@
 {
   "name": "jira-ticket-update",
   "displayName": "Jira Ticket Update",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keeps Jira tickets true without remembering to. On a commit, an opened or merged PR, the end of a session, or when you ask, Claude drafts a factual comment and the right status move, asks you once, then posts it through the Atlassian MCP.",
   "author": { "name": "myind-ai", "url": "https://github.com/myind-ai" },
   "homepage": "https://github.com/myind-ai/workpulse-extension/tree/main/plugins/jira-ticket-update",

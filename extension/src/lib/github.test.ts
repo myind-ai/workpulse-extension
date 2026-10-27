@@ -111,6 +111,56 @@ describe('writing a backup as one commit', () => {
 		expect(out).toEqual({ sha: 'commit1', files: 2 })
 	})
 
+	describe('a named branch that is not there yet', () => {
+		/** `main` has history; `brain` does not exist. `emptyRepo` makes main missing too. */
+		const repo = (seen: [string, RequestInit?][], opts: { emptyRepo?: boolean; refusePutOnBrain?: boolean } = {}) => {
+			let started = false
+			return vi.fn(async (url: string, init?: RequestInit) => {
+				const u = String(url)
+				seen.push([u, init])
+				if (u.endsWith('/git/ref/heads/main')) return opts.emptyRepo && !started ? fail(409) : ok({ object: { sha: 'main-sha' } })
+				if (u.endsWith('/git/ref/heads/brain')) return started && !opts.refusePutOnBrain ? ok({ object: { sha: 'first' } }) : fail(404)
+				if (u.includes('/git/commits/')) return ok({ tree: { sha: 't0' } })
+				if (u.includes('/contents/') && init?.method === 'PUT') {
+					const body = JSON.parse(String(init.body))
+					if (opts.refusePutOnBrain && body.branch === 'brain') return fail(404, '{"message":"Branch brain not found"}')
+					started = true
+					return ok({})
+				}
+				if (u.includes('/contents/')) return fail(404)
+				if (u.endsWith('/git/trees')) return ok({ sha: 'tree-new' })
+				if (u.endsWith('/git/commits')) return ok({ sha: 'commit-new' })
+				if (u.endsWith('/git/refs') || u.includes('/git/refs/heads/')) return ok({})
+				return ok({ full_name: 'me/notes', private: true, permissions: { push: true }, default_branch: 'main' })
+			}) as unknown as typeof fetch
+		}
+		const body = (seen: [string, RequestInit?][], match: (u: string, i?: RequestInit) => boolean) => JSON.parse(String(seen.find(([u, i]) => match(u, i))![1]!.body))
+
+		it('should start it empty beside the code: no base tree, no parent, then create the ref', async () => {
+			const seen: [string, RequestInit?][] = []
+			expect(await client(repo(seen), 'brain').commit(files, 'first backup')).toEqual({ sha: 'commit-new', files: 2 })
+			expect(body(seen, (u) => u.endsWith('/git/trees')).base_tree).toBeUndefined()
+			expect(body(seen, (u) => u.endsWith('/git/commits')).parents).toEqual([])
+			expect(body(seen, (u, i) => u.endsWith('/git/refs') && i?.method === 'POST')).toEqual({ ref: 'refs/heads/brain', sha: 'commit-new' })
+			expect(seen.some(([u, i]) => u.includes('/contents/') && i?.method === 'PUT')).toBe(false) // never writes next to the code on main
+		})
+
+		it('should start an empty repository on that branch when GitHub accepts it', async () => {
+			const seen: [string, RequestInit?][] = []
+			await client(repo(seen, { emptyRepo: true }), 'brain').commit(files, 'first backup')
+			expect(body(seen, (u, i) => u.includes('/contents/') && i?.method === 'PUT').branch).toBe('brain')
+		})
+
+		it('should start an empty repository with a README on main, then the branch, when GitHub refuses', async () => {
+			const seen: [string, RequestInit?][] = []
+			expect(await client(repo(seen, { emptyRepo: true, refusePutOnBrain: true }), 'brain').commit(files, 'first backup')).toEqual({ sha: 'commit-new', files: 2 })
+			const puts = seen.filter(([u, i]) => u.includes('/contents/') && i?.method === 'PUT').map(([u, i]) => [u.split('/contents/')[1], JSON.parse(String(i!.body)).branch])
+			expect(puts).toEqual([['workpulse/backup.json', 'brain'], ['README.md', 'main']])
+			expect(body(seen, (u, i) => u.endsWith('/git/refs') && i?.method === 'POST').ref).toBe('refs/heads/brain')
+			expect(body(seen, (u) => u.endsWith('/git/trees')).tree).toHaveLength(2) // every file is on brain
+		})
+	})
+
 	it('should not reach for the git database at all for a single first file', async () => {
 		const seen: string[] = []
 		const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
