@@ -31,7 +31,7 @@ export interface ZohoApi {
 	attendance(date: string): Promise<Attendance>
 	jobs(email: string): Promise<Job[]>
 	userReport(email: string, from: string, to: string): Promise<DayReport[]>
-	addTimelog(a: { email: string; date: string; jobId: string; minutes: number; description: string; billing: string }): Promise<string>
+	addTimelog(a: { email: string; date: string; jobId: string; minutes: number; description: string; billing: string; from?: string; to?: string }): Promise<string>
 	punch(email: string, checkIn: boolean, at: number): Promise<void>
 }
 
@@ -185,14 +185,20 @@ export class ZohoClient implements ZohoApi {
 	}
 
 	/** `minutes` is the truth; Zoho takes HH:MM, which keeps it exact. */
-	async addTimelog(a: { email: string; date: string; jobId: string; minutes: number; description: string; billing: string }) {
+	/**
+	 * Zoho takes either hours or a from–to pair ("Either Hour or From - To time
+	 * or timer:start has to be sent", 24-hour `14:30` accepted). With `from` and
+	 * `to` (IST, HH:mm) the log carries its real times; hours otherwise.
+	 */
+	async addTimelog(a: { email: string; date: string; jobId: string; minutes: number; description: string; billing: string; from?: string; to?: string }) {
+		const when: Record<string, string> = a.from && a.to ? { fromTime: a.from, toTime: a.to } : { hours: hhmm(a.minutes) }
 		return parseTimelog(
 			await this.call('POST', 'timetracker/addtimelog', {
 				user: a.email,
 				workDate: a.date,
 				dateFormat: 'yyyy-MM-dd',
 				jobId: a.jobId,
-				hours: hhmm(a.minutes),
+				...when,
 				description: a.description,
 				billingStatus: a.billing,
 			}),

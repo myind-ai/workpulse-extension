@@ -55,28 +55,6 @@ export function brainRecord(entry: BridgeEntry): BrainArtifact {
 	return { path: recordPath(entry), content: [...front, ...section('Summary', entry.body), ...section('Asked', entry.asked), ...section('Done', entry.done), ...section('Root cause', entry.rootCause), ...section('Next action', next), ...section('Links', related), ''].join('\n') }
 }
 
-const terms = (text?: string) => [...new Set(String(text ?? '').toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}/g) ?? [])]
-
-/**
- * Past work like this, best first. Title words count most, then the subtitle
- * and tags, then everything else written down; ties go to the newer entry.
- */
-export function searchBrain(entries: BridgeEntry[], query: string): { e: BridgeEntry; score: number }[] {
-	const wanted = terms(query)
-	if (!wanted.length) return []
-	return entries
-		.map((e) => {
-			const title = terms(e.title)
-			const subtitle = terms(e.subtitle)
-			const tags = (e.tags ?? []).map((t) => t.toLowerCase())
-			const rest = terms([e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, ...(e.next ?? [])].filter(Boolean).join(' '))
-			const score = wanted.reduce((n, w) => n + (title.includes(w) ? 8 : 0) + (subtitle.includes(w) ? 5 : 0) + (tags.includes(w) ? 5 : 0) + (rest.includes(w) ? 2 : 0), 0)
-			return { e, score }
-		})
-		.filter((x) => x.score > 0)
-		.sort((a, b) => b.score - a.score || b.e.at - a.e.at)
-}
-
 export interface OpenWork {
 	/** The ticket key, or the project, or the entry's own title when it has neither. */
 	key: string

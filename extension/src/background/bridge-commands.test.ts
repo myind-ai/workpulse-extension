@@ -97,3 +97,24 @@ describe('saving to the Brain', () => {
 		expect(hits.find((h) => h.kind === 'brain')).toBeTruthy()
 	})
 })
+
+describe('filters and the page you are on', () => {
+	beforeEach(async () => {
+		await connect()
+		await cmd.saveContext({ title: 'Retry fix half done', kind: 'debug', next: 'Run the two-retry test', page: { title: 'PAY-2433 - Jira', url: 'https://acme.atlassian.net/browse/PAY-2433' } })
+		await cmd.saveContext({ title: 'Picked a queue for retries', kind: 'decision', ticket: 'PAY-9' })
+	})
+
+	it('a filter makes the one search the Brain’s, and filters alone list what passes', async () => {
+		expect((await cmd.findAll('queue type:decision')).hits.map((h) => h.text)).toEqual(['Picked a queue for retries'])
+		expect((await cmd.findAll('has:next-action')).hits.map((h) => h.text)).toEqual(['Retry fix half done'])
+		expect((await cmd.findAll('ticket:PAY-404')).hits).toEqual([])
+	})
+
+	it('names the records for a Jira page, and nothing for an unrelated one', async () => {
+		const r = await cmd.relatedContext('https://acme.atlassian.net/browse/PAY-2433?focused=1')
+		expect(r).toMatchObject({ keys: ['PAY-2433'], total: 1 })
+		expect(r.entries[0]).toMatchObject({ title: 'Retry fix half done', why: 'link' })
+		expect((await cmd.relatedContext('https://example.com/')).total).toBe(0)
+	})
+})

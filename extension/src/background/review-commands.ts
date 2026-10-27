@@ -123,7 +123,7 @@ export class ReviewCommands extends DayCommands {
 		this.env.ui.changed()
 	}
 
-	async pushDay(date: string, rows: { jobId?: string; minutes: number; description: string }[], uids: string[] = []): Promise<PushResult> {
+	async pushDay(date: string, rows: { jobId?: string; minutes: number; description: string; from?: number; to?: number }[], uids: string[] = []): Promise<PushResult> {
 		const s = await this.store.settings()
 		if (!allowed(s.zohoMode, 'timelog') || !(await this.zoho.hasAuth())) {
 			throw new Error('Pushing needs Time-logs or Full mode and a Zoho connection. Use Copy + Mark as done instead.')
@@ -133,8 +133,20 @@ export class ReviewCommands extends DayCommands {
 		if (bad >= 0) throw new Error(`Row ${bad + 1} needs a job and time above 0.`)
 		const done: number[] = []
 		for (const [i, r] of rows.entries()) {
+			const log = { email: s.email, date, jobId: r.jobId!, minutes: Math.round(r.minutes), description: r.description, billing: s.billingStatus }
+			// The real start and end, when the row is one stretch and its hours were
+			// not edited (the times would then say something else than the hours).
+			const timed = s.timelogTimes && r.from != null && r.to != null && r.to > r.from && Math.round((r.to - r.from) / 60_000) === Math.round(r.minutes)
 			try {
-				await this.zoho.addTimelog({ email: s.email, date, jobId: r.jobId!, minutes: Math.round(r.minutes), description: r.description, billing: s.billingStatus })
+				try {
+					await this.zoho.addTimelog(timed ? { ...log, from: istTime(r.from!), to: istTime(r.to!) } : log)
+				} catch (first) {
+					// Some timesheets take hours only: send the same row as hours.
+					// Not for a day off or "more than attendance", which hours would not fix.
+					const z = first instanceof ZohoError ? first : new ZohoError(errText(first))
+					if (!timed || z.isOffDay || z.isBeyondAttendance) throw first
+					await this.zoho.addTimelog(log)
+				}
 				done.push(i)
 			} catch (e) {
 				const z = e instanceof ZohoError ? e : new ZohoError(errText(e))

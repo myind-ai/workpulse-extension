@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
+import { describeFilters, matchBrain, parseBrainQuery } from '@/core/brain-query'
 import { filter, KIND_LABEL, KINDS, reportMarkdown, type BridgeEntry, type EntryKind, type Scope } from '@/core/bridge'
 import { enabled } from '@/core/features'
 import { fileName } from '@/core/export'
@@ -64,7 +65,13 @@ export function BrainView({ arg }: { arg?: string }) {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
-	const found = useMemo(() => filter(data?.entries ?? [], { kind, scope, query, ticket, project }), [data, kind, scope, query, ticket, project])
+	// `ticket:PAY-1 type:debug status:open has:next-action #retry after:7d` narrow
+	// it; whatever else is typed is searched as words, as before.
+	const parsed = useMemo(() => parseBrainQuery(query), [query])
+	const found = useMemo(
+		() => filter((data?.entries ?? []).filter((e) => matchBrain(e, parsed.filters)), { kind, scope, query: parsed.text, ticket, project }),
+		[data, kind, scope, parsed, ticket, project],
+	)
 	const shown = found.slice(0, show)
 	const s = data?.summary
 
@@ -176,7 +183,13 @@ export function BrainView({ arg }: { arg?: string }) {
 								))}
 							</span>
 						)}
-						<input className="wp-input wp-grow" style={{ minWidth: 180 }} placeholder="Search a word, a #tag, a ticket…" value={query} onChange={(e) => setQuery(e.target.value)} />
+						<input className="wp-input wp-grow" style={{ minWidth: 180 }} placeholder="Search, or filter: ticket:PAY-1 type:debug status:open has:next-action #tag after:7d"
+							title="Filters: ticket: type: status:open|done repo: tag: (or #tag) after: before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:work|personal" value={query} onChange={(e) => setQuery(e.target.value)} />
+						{describeFilters(parsed.filters).map((f) => (
+							<span key={f} className="wp-chip wp-chip-accent">
+								{f}
+							</span>
+						))}
 						{(ticket || project || query) && (
 							<button className="wp-action" onClick={() => (setTicket(undefined), setProject(undefined), setQuery(''))}>
 								clear {ticket ?? project ?? ''}

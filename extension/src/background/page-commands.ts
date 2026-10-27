@@ -188,7 +188,7 @@ export class PageCommands extends SetupCommands {
 	 * your click in Review. Each row is molded from your captured save, so the
 	 * org's ids stay exactly as Zoho wrote them.
 	 */
-	async pushDay(date: string, rows: { jobId?: string; minutes: number; description: string; workItem?: string }[], uids: string[] = []) {
+	async pushDay(date: string, rows: { jobId?: string; minutes: number; description: string; workItem?: string; from?: number; to?: number }[], uids: string[] = []) {
 		const rt = await this.store.runtime()
 		const apiUsable = !rt.roleBlocked && (await this.zoho.hasAuth())
 		if (!apiUsable) return this.pushDayViaPage(date, rows, uids)

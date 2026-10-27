@@ -88,6 +88,8 @@ const ctx = await chromium.launchPersistentContext(profile, {
 	args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
 })
 if (!REAL) await ctx.route('https://api.github.com/**', github)
+// A Jira issue page, for the Brain's related context.
+if (!REAL) await ctx.route('https://acme.atlassian.net/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>[PAY-2433] Webhook retry - Jira</title><h1>PAY-2433 Webhook retry</h1>' }))
 let [sw] = ctx.serviceWorkers()
 if (!sw) sw = await ctx.waitForEvent('serviceworker')
 const extId = new URL(sw.url()).host
@@ -220,6 +222,35 @@ const main = async () => {
 		console.log(`palette search finds the Brain entry: ${(await page.locator('.wp-pal-list').textContent())?.includes('Brain') ? 'yes' : 'NO'}`)
 		await shot('15-palette-finds-brain')
 		await page.keyboard.press('Escape')
+
+		// Filters on the Brain page and in the one search.
+		await page.goto(ext('dashboard.html#/brain'))
+		await page.waitForTimeout(1200)
+		await page.getByPlaceholder(/Search, or filter/).fill('type:decision')
+		await page.waitForTimeout(500)
+		const cards = await page.locator('article.wp-card').count()
+		console.log(`brain page "type:decision": ${cards} card(s), chip ${(await page.getByText('type decision', { exact: true }).count()) ? 'shown' : 'MISSING'}`)
+		await shot('16-brain-filter')
+		await page.getByText('Quick actions').click()
+		await page.locator('.wp-pal-input').first().fill('ticket:PAY-2433 has:next-action')
+		await page.waitForTimeout(1200)
+		console.log(`palette "ticket:PAY-2433 has:next-action": ${await page.locator('.wp-pal-list .wp-pal-hit').count()} hit(s)`)
+		await shot('17-palette-filter')
+		await page.keyboard.press('Escape')
+
+		// A Jira issue the Brain knows: the bubble on arrival, and the palette's This page list.
+		const jira = await ctx.newPage()
+		await jira.goto('https://acme.atlassian.net/browse/PAY-2433')
+		await jira.bringToFront()
+		await jira.waitForTimeout(2500)
+		console.log(`related bubble on the Jira page: ${(await jira.locator('#wp-tz-bubble').count()) ? 'shown' : 'NOT shown'}`)
+		await jira.screenshot({ path: join(OUT, '18-jira-related-bubble.png') })
+		const rel = await jira.evaluate(() => chrome.runtime?.id).catch(() => null)
+		const related = await page.evaluate(() => chrome.runtime.sendMessage({ wp: 'call', method: 'relatedContext', args: ['https://acme.atlassian.net/browse/PAY-2433', '[PAY-2433] Webhook retry - Jira'] }))
+		console.log(`relatedContext: ${related.result.total} for ${related.result.keys.join(',')}; first: ${related.result.entries[0]?.title}`)
+		void rel
+		await jira.close()
+		await page.bringToFront()
 
 		// Settings → Claude Code & the Brain: the link, step by step, and the commands.
 		await page.goto(ext('dashboard.html#/settings/claude'))

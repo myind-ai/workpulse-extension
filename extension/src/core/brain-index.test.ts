@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { brainIndex, brainRecord, openWork, searchBrain } from './brain-index'
+import { brainIndex, brainRecord, openWork } from './brain-index'
+import { searchBrain } from './brain-query'
 import type { BridgeEntry } from './bridge'
 
 const entry: BridgeEntry = {

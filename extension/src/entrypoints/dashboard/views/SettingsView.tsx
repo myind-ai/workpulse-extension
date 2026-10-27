@@ -221,6 +221,12 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 							Tell me when a mistake keeps coming back <span className="wp-muted wp-small">— once a week, by name</span>
 						</span>
 					</label>
+					<label className="wp-row" style={{ gap: 8 }}>
+						<input type="checkbox" checked={form.brainOnPages} onChange={(e) => set('brainOnPages', e.target.checked)} />
+						<span>
+							Show what the Brain has for the page I am on <span className="wp-muted wp-small">— a Jira ticket, a pull request, staging or localhost; once per tab</span>
+						</span>
+					</label>
 				</div>
 				<div>
 					<label className="wp-label">Work days</label>
@@ -414,6 +420,12 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 					</div>
 				</div>
 				<div className="wp-muted wp-small">{jobs?.length ? `${jobs.length} jobs cached from Zoho.` : 'No jobs cached yet. Connect Zoho and refresh.'}</div>
+				<label className="wp-row" style={{ gap: 8 }}>
+					<input type="checkbox" checked={form.timelogTimes} onChange={(e) => set('timelogTimes', e.target.checked)} />
+					<span>
+						Send the real start and end time <span className="wp-muted wp-small">— a row of back-to-back hours goes to Zoho as 10:00–13:00, not just 3:00. If Zoho refuses the times, it is sent as hours.</span>
+					</span>
+				</label>
 			</Panel>
 					<div className="wp-stack-sm">
 						<h3 className="wp-h2">Back up before a reinstall</h3>

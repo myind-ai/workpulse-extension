@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { awayMinutes, awayNote, classify, classifyLocal, groupEntries, hoursFromHHMM, parseZohoDateTime, rowsPerEntry, scanRange, splitRows, type DayReport } from './rules'
+import { awayMinutes, awayNote, classify, classifyLocal, entryBlocks, groupEntries, hoursFromHHMM, parseZohoDateTime, rowsPerTask, scanRange, spanOf, splitRows, type DayReport } from './rules'
 import { parseIst } from './time'
 import type { Entry, Job } from './types'
 
@@ -153,10 +153,9 @@ describe('how a day is cut into timesheet rows', () => {
 		expect(out[1].description).toBe('PII data in logs, found while testing the lender errors; Tested CRM QA RC PAY-2930')
 	})
 
-	it('should name an entry that straddles a boundary in both rows', () => {
+	it('should keep a task longer than the cap as one row, never cut it into copies', () => {
 		const out = splitRows([hour('09:00', 'Long debugging session', 90)], jobs, 60)
-		expect(out.map((r) => r.minutes)).toEqual([45, 45])
-		expect(out.every((r) => r.description === 'Long debugging session')).toBe(true)
+		expect(out.map((r) => [r.minutes, r.description])).toEqual([[90, 'Long debugging session']])
 	})
 
 	it('should never lose or invent a minute', () => {
@@ -166,15 +165,16 @@ describe('how a day is cut into timesheet rows', () => {
 			[61, 60],
 			[7, 2],
 		]) {
-			const out = splitRows([hour('09:00', 'x', minutes)], jobs, max)
-			expect(out.reduce((a, r) => a + r.minutes, 0)).toBe(minutes)
-			expect(out.every((r) => r.minutes <= max)).toBe(true)
+			const out = splitRows([hour('09:00', 'x', minutes), hour('15:00', 'y', 30)], jobs, max)
+			expect(out.reduce((a, r) => a + r.minutes, 0)).toBe(minutes + 30)
+			// Over the cap only when a single task is longer than it.
+			expect(out.every((r) => r.minutes <= max || !r.description.includes(';'))).toBe(true)
 		}
 	})
 
-	it('should spread the remainder instead of dumping it on the last row', () => {
-		expect(splitRows([hour('09:00', 'x', 100)], jobs, 30).map((r) => r.minutes)).toEqual([25, 25, 25, 25])
-		expect(splitRows([hour('09:00', 'x', 7)], jobs, 3).map((r) => r.minutes)).toEqual([3, 2, 2])
+	it('should start a new row when the next task would go over the cap', () => {
+		const tasks = [hour('09:00', 'Review', 30), hour('09:30', 'Fix', 60), hour('10:30', 'Tests', 30)]
+		expect(splitRows(tasks, jobs, 90).map((r) => [r.minutes, r.description])).toEqual([[90, 'Review; Fix'], [30, 'Tests']])
 	})
 
 	it('should cut each job separately, in the order they first appear', () => {
@@ -198,13 +198,13 @@ describe('how a day is cut into timesheet rows', () => {
 		expect(splitRows([noJob], jobs, 60)[0].jobName).toBe('No job')
 	})
 
-	it('should give each entry its own row when that is what you want', () => {
+	it('should give each task its own row when that is what you want', () => {
 		const entries = [
 			{ uid: 'a', date: '2026-10-12', slotStart: 1, slotEnd: 2, text: 'Reviewed the PR', minutes: 60, kind: 'work' as const, synced: false, jobId: 'j1' },
 			{ uid: 'b', date: '2026-10-12', slotStart: 3, slotEnd: 4, text: 'Lunch', minutes: 0, kind: 'break' as const, synced: false },
 			{ uid: 'c', date: '2026-10-12', slotStart: 5, slotEnd: 6, text: 'Fixed the retry bug', minutes: 45, kind: 'work' as const, synced: false, jobId: 'j1' },
 		]
-		const rows = rowsPerEntry(entries, [{ id: 'j1', name: 'Payment service', project: 'Checkout' }])
+		const rows = rowsPerTask(entries, [{ id: 'j1', name: 'Payment service', project: 'Checkout' }])
 		expect(rows.map((r) => [r.description, r.minutes])).toEqual([
 			['Reviewed the PR', 60],
 			['Fixed the retry bug', 45],
@@ -275,7 +275,92 @@ describe('a meeting is its own line on the timesheet', () => {
 		expect(meeting).toHaveLength(1)
 		expect(meeting[0].minutes).toBe(15)
 		expect(meeting[0].jobName).toBe('Engineering')
-		// The 120 minutes of work still split into two rows of an hour.
-		expect(rows.filter((r) => r.description.includes('webhook'))).toHaveLength(2)
+		// The 120 minutes on one task stay one row: the cap never cuts a task.
+		expect(rows.filter((r) => r.description.includes('webhook')).map((r) => r.minutes)).toEqual([120])
+	})
+})
+
+describe('the same task in several hours', () => {
+	const jobs: Job[] = [{ id: 'j1', name: 'Payment service', project: 'Checkout' }, { id: 'j2', name: 'Internal', project: 'Ops' }]
+	let n = 0
+	const at = (time: string, text: string, jobId = 'j1', minutes = 60): Entry => ({
+		uid: `u${n++}`, date: '2026-10-12', slotStart: parseIst(`2026-10-12T${time}:00`), slotEnd: parseIst(`2026-10-12T${time}:00`) + 3_600_000, text, jobId, minutes, kind: 'work', synced: false,
+	})
+
+	it('is one row whose time grows: 1 h, then 2 h, then 3 h', () => {
+		const day = [at('09:00', 'LEAP-19 webhook retry')]
+		expect(rowsPerTask(day, jobs).map((r) => [r.description, r.minutes])).toEqual([['LEAP-19 webhook retry', 60]])
+		day.push(at('10:00', 'LEAP-19 webhook retry'))
+		expect(rowsPerTask(day, jobs).map((r) => [r.description, r.minutes])).toEqual([['LEAP-19 webhook retry', 120]])
+		day.push(at('11:00', 'leap-19  webhook retry.'))
+		expect(rowsPerTask(day, jobs).map((r) => [r.description, r.hours])).toEqual([['LEAP-19 webhook retry', 3]])
+	})
+
+	it('counts "same" and "continued" as the task before, in the same job', () => {
+		const day = [at('09:00', 'Payment retry fix'), at('10:00', 'Daily standup', 'j2', 30), at('10:30', 'same', 'j1', 30), at('11:00', 'continued')]
+		expect(rowsPerTask(day, jobs).map((r) => [r.jobName, r.description, r.minutes])).toEqual([
+			['Payment service', 'Payment retry fix', 150],
+			['Internal', 'Daily standup', 30],
+		])
+	})
+
+	it('keeps different tasks, and the same words under another job, apart, in the order started', () => {
+		const day = [at('09:00', 'Code review'), at('10:00', 'Retry fix'), at('11:00', 'Code review'), at('12:00', 'Code review', 'j2')]
+		expect(rowsPerTask(day, jobs).map((r) => [r.jobId, r.description, r.minutes])).toEqual([
+			['j1', 'Code review', 120],
+			['j1', 'Retry fix', 60],
+			['j2', 'Code review', 60],
+		])
+	})
+
+	it('names a repeated task once in a job row, and never writes "same"', () => {
+		const day = [at('09:00', 'Retry fix'), at('10:00', 'Retry fix.'), at('11:00', 'same as last hour'), at('12:00', 'Tests')]
+		expect(groupEntries(day, jobs)[0]).toMatchObject({ minutes: 240, description: 'Retry fix; Tests' })
+		expect(splitRows(day, jobs, 0)[0]).toMatchObject({ minutes: 240, description: 'Retry fix; Tests' })
+		// Capped at 2 h, the 3 h retry fix is still one row, never cut into copies.
+		expect(splitRows(day, jobs, 120).map((r) => [r.description, r.minutes])).toEqual([['Retry fix', 180], ['Tests', 60]])
+	})
+
+	it('leaves "same" alone when nothing came before it', () => {
+		expect(rowsPerTask([at('09:00', 'same')], jobs)[0].description).toBe('same')
+	})
+})
+
+describe('real times and the day as blocks', () => {
+	const jobs: Job[] = [{ id: 'j1', name: 'Payment service', project: 'Checkout' }]
+	let n = 0
+	const at = (time: string, text: string, minutes = 60, over: Partial<Entry> = {}): Entry => ({
+		uid: `b${n++}`, date: '2026-10-12', slotStart: parseIst(`2026-10-12T${time}:00`), slotEnd: parseIst(`2026-10-12T${time}:00`) + 3_600_000, text, jobId: 'j1', minutes, kind: 'work', synced: false, ...over,
+	})
+
+	it('gives a row from and to when its hours are one unbroken, fully claimed stretch', () => {
+		const day = [at('10:00', 'Retry fix'), at('11:00', 'Retry fix'), at('12:00', 'same as last hour')]
+		const [row] = rowsPerTask(day, jobs)
+		expect([row.minutes, row.from, row.to]).toEqual([180, parseIst('2026-10-12T10:00:00'), parseIst('2026-10-12T13:00:00')])
+		expect(splitRows(day, jobs, 60)[0]).toMatchObject({ from: parseIst('2026-10-12T10:00:00'), to: parseIst('2026-10-12T13:00:00') })
+	})
+
+	it('gives no times across a gap, or when an hour is only partly claimed', () => {
+		expect(spanOf([at('10:00', 'A'), at('12:00', 'A')])).toBeUndefined()
+		expect(spanOf([at('10:00', 'A', 45)])).toBeUndefined()
+		const gap = rowsPerTask([at('10:00', 'A'), at('14:00', 'A')], jobs)[0]
+		expect([gap.minutes, gap.from]).toEqual([120, undefined])
+	})
+
+	it('shows back-to-back hours of one task as one line, and breaks it where the task changes', () => {
+		const day = [
+			at('10:00', 'Retry fix'), at('11:00', 'retry fix.'), at('12:00', 'same as last hour'),
+			at('13:00', 'Lunch', 0, { kind: 'break' }),
+			at('14:00', 'Retry fix'), at('15:00', 'Code review'),
+			at('16:00', 'Code review', 60, { synced: true }),
+		]
+		expect(entryBlocks(day).map((b) => [b.text, b.uids.length, b.minutes])).toEqual([
+			['Retry fix', 3, 180],
+			['Lunch', 1, 0],
+			['Retry fix', 1, 60],
+			['Code review', 1, 60],
+			['Code review', 1, 60],
+		])
+		expect(entryBlocks(day)[0].slotEnd).toBe(parseIst('2026-10-12T13:00:00'))
 	})
 })

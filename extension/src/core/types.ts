@@ -21,6 +21,8 @@ export interface Settings {
 	dataCenter: DataCenter
 	attendanceUrl: string // the Zoho page that reminders open
 	billingStatus: 'billable' | 'non-billable'
+	/** Send a row's real start and end (fromTime/toTime) when its hours are one unbroken stretch; hours otherwise. */
+	timelogTimes: boolean
 	/** Minutes after shift end before the wrap-up reminder is forced. */
 	wrapupDelay: number
 	oauthClientId: string // Zoho "Client-based application" for Sign in with Zoho
@@ -31,6 +33,8 @@ export interface Settings {
 	learnPrompt: boolean
 	/** Say so when a mistake keeps coming back. Once a week, at most. */
 	learnLoop: boolean
+	/** On a ticket, pull request or staging page, say what the Brain has for it. Once per tab per page. */
+	brainOnPages: boolean
 	/** Ring, not just show, when the check-in is overdue — once a day. */
 	alarmCheckIn: boolean
 	/** Ring at the end of the shift, so the day gets closed. */
@@ -141,12 +145,14 @@ export const DEFAULT_SETTINGS: Settings = {
 	dataCenter: 'in',
 	attendanceUrl: 'https://people.zoho.in/',
 	billingStatus: 'non-billable',
+	timelogTimes: true,
 	wrapupDelay: 30,
 	oauthClientId: '',
 	scopes: READ_SCOPES,
 	sound: true,
 	learnPrompt: true,
 	learnLoop: true,
+	brainOnPages: true,
 	alarmCheckIn: true,
 	alarmCheckOut: true,
 	breakAfterHours: 3,

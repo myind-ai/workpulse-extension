@@ -21,9 +21,10 @@
 //   wp-brain add <kind> "title" [--subtitle TEXT] [--ticket K] [--project P] [--scope work|personal] [--body TEXT|--body-file F]
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
-//   wp-brain brief [TICKET] [--project P]   what to know before starting
+//   wp-brain brief [TICKET] [--project P] [--about "words"]   what to know before starting (+ related learnings)
 //   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N]
-//   wp-brain search "words" [--limit N]     ranked similar context across every saved record
+//   wp-brain search "words" [--limit N]     ranked past work; filters: ticket: type: status:open|done repo: tag:/#tag
+//                                           after:/before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:
 //   wp-brain index [--no-push]              add any missing records of this device; write INDEX.md and graph.json
 //                                           next to the clone (built from every device, never committed)
 //   wp-brain report [--days 7] [--scope S]
@@ -48,7 +49,8 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	process.exit(1)
 })
 const { KINDS, ROOT, appendLine, entriesPath, filter, fold, newEntry, reportMarkdown, secretsIn, summarise } = bridge
-const { brainIndex, brainRecord, searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
+const { brainIndex, brainRecord } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
+const { searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-query.ts'))
 const { doctor, ensureRepo, extensionSteps, nudgeText, settingsHasHook, setup } = await import(join(here, 'setup.mjs'))
 
 const CONFIG = process.env.WP_BRAIN_CONFIG || join(homedir(), '.config', 'workpulse', 'brain.json')
@@ -184,7 +186,8 @@ function die(msg) {
 }
 
 const day = (t) => new Date(t).toISOString().slice(0, 10)
-const short = (e) => `${day(e.at)}  ${e.kind.padEnd(8)} ${e.scope === 'personal' ? '[personal] ' : ''}${e.ticket ? e.ticket + ' ' : ''}${e.project ? '(' + e.project + ') ' : ''}${e.title}`
+// A title that already starts with its ticket key does not need it twice.
+const short = (e) => `${day(e.at)}  ${e.kind.padEnd(8)} ${e.scope === 'personal' ? '[personal] ' : ''}${e.ticket ? e.ticket + ' ' : ''}${e.project ? '(' + e.project + ') ' : ''}${e.ticket && e.title.toUpperCase().startsWith(e.ticket) ? e.title.slice(e.ticket.length).replace(/^[\s:—-]+/, '') : e.title}`
 
 /** An entry's readable record, written once, by the device that wrote the entry. */
 function writeRecord(cfg, entry) {
@@ -329,7 +332,7 @@ const commands = {
 	brief({ pos, opt }) {
 		const cfg = config()
 		pull(cfg)
-		const out = briefLines(cfg, readAll(cfg), pos[0]?.toUpperCase(), typeof opt.project === 'string' ? opt.project : undefined)
+		const out = briefLines(cfg, readAll(cfg), pos[0]?.toUpperCase(), typeof opt.project === 'string' ? opt.project : undefined, typeof opt.about === 'string' ? opt.about : '')
 		console.log(out.length ? out.join('\n') : 'Nothing recorded yet.')
 	},
 
@@ -369,8 +372,12 @@ const commands = {
 		// Entries name a project either as owner/repo or by the repo alone.
 		const project = [remote, remote?.split('/')[1]].find((p) => p && all.some((e) => e.project === p)) ?? remote
 		const known = all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || (project && e.project === project))
-		if (!known.length && !pending(cfg).length) return
-		const lines = briefLines(cfg, all, key, project)
+		// The branch's own words (fix/pay-2433-retry-webhook → retry webhook) find
+		// what was learned before on the same subject under other tickets.
+		const about = branch.replace(/^[^/]*\//, '').replace(/\b[a-z]{2,10}-\d{1,6}\b/i, '').replace(/[-_/]+/g, ' ').trim()
+		const learnedBefore = about.length > 2 && searchBrain(all.filter((e) => ['learning', 'mistake', 'debug', 'decision'].includes(e.kind)), about).length > 0
+		if (!known.length && !pending(cfg).length && !learnedBefore) return
+		const lines = briefLines(cfg, all, key, project, about)
 		const text = [`WorkPulse Brain — what was recorded before for ${[key, project].filter(Boolean).join(' / ')} (read it before planning; record mistakes and the session with the workpulse-brain skill):`, '', ...lines].join('\n')
 		process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text.slice(0, 8000) } }))
 	},
@@ -418,7 +425,7 @@ const commands = {
 
 	search({ pos, opt }) {
 		const query = pos.join(' ').trim()
-		if (!query) die('Usage: wp-brain search "words" [--limit N]')
+		if (!query) die('Usage: wp-brain search "words ticket:K type:debug status:open has:next-action #tag after:7d" [--limit N]')
 		const cfg = config()
 		pull(cfg)
 		const got = searchBrain(readAll(cfg), query)
@@ -427,7 +434,7 @@ const commands = {
 			if (e.subtitle) console.log('    ' + e.subtitle)
 			if (e.next?.length) console.log('    next: ' + e.next.join(' · '))
 		}
-		if (!got.length) console.log('Nothing similar yet. Save a specific title, subtitle, tags, and next action first.')
+		if (!got.length) console.log('Nothing matches. Fewer words or filters find more; specific titles, tags and next actions are what make entries findable.')
 	},
 
 	index({ opt }) {
@@ -527,7 +534,7 @@ function sessionContext() {
 }
 
 /** The brief: earlier entries for a ticket and project, repeat mistakes, open follow-ups, the inbox. */
-function briefLines(cfg, all, key, project) {
+function briefLines(cfg, all, key, project, about = '') {
 	const out = []
 	if (key) {
 		const mine = all.filter((e) => e.ticket === key || e.links?.related?.includes(key))
@@ -542,7 +549,16 @@ function briefLines(cfg, all, key, project) {
 	}
 	if (project) {
 		const p = all.filter((e) => e.project === project).slice(0, 10)
-		out.push('', `## ${project}: last ${p.length}`, ...p.map((e) => `- ${short(e)}`))
+		if (p.length) out.push('', `## ${project}: last ${p.length}`, ...p.map((e) => `- ${short(e)}`))
+	}
+	// Learned before on the same subject, from other tickets and projects.
+	const shown = new Set(all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || (project && e.project === project)).map((e) => e.id))
+	const learned = about.split(/\s+/).filter((w) => w.length > 2).length
+		? searchBrain(all.filter((e) => ['learning', 'mistake', 'debug', 'decision'].includes(e.kind) && !shown.has(e.id)), about).slice(0, 5)
+		: []
+	if (learned.length) {
+		out.push('', `## Learned before about "${about}"`)
+		for (const { e } of learned) out.push(`- ${short(e)}${e.rootCause ? ` (root cause: ${e.rootCause})` : ''}`)
 	}
 	const recent = all.filter((e) => e.at > Date.now() - 30 * DAY)
 	const { repeats } = summarise(recent)

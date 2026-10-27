@@ -303,6 +303,39 @@ describe('with Zoho connected', () => {
 		expect(zoho.logged).toHaveLength(2)
 		await expect(cmd.pushDay('2026-10-12', [{ minutes: 60, description: 'x' }])).rejects.toThrow('needs a job')
 	})
+
+	it('sends a continuous row with its real start and end, and an edited one as hours', async () => {
+		zoho.auth = true
+		await store.saveSettings({ email: 'me@example.com', zohoMode: 'timelogs' })
+		const from = parseIst('2026-10-12T10:00:00')
+		await cmd.pushDay('2026-10-12', [
+			{ jobId: 'j1', minutes: 180, description: 'retry fix', from, to: from + 180 * 60_000 },
+			{ jobId: 'j1', minutes: 150, description: 'edited to 2:30', from, to: from + 180 * 60_000 },
+		])
+		expect(zoho.logged).toEqual([
+			expect.objectContaining({ minutes: 180, from: '10:00', to: '13:00' }),
+			expect.not.objectContaining({ from: expect.anything() }),
+		])
+	})
+
+	it('sends hours when the setting is off, and retries as hours when Zoho refuses the times', async () => {
+		zoho.auth = true
+		const from = parseIst('2026-10-12T10:00:00')
+		const row = { jobId: 'j1', minutes: 60, description: 'x', from, to: from + 3_600_000 }
+		await store.saveSettings({ email: 'me@example.com', zohoMode: 'timelogs', timelogTimes: false })
+		await cmd.pushDay('2026-10-12', [row])
+		expect(zoho.logged[0]).not.toHaveProperty('from')
+
+		await store.saveSettings({ timelogTimes: true })
+		zoho.logged = []
+		const real = zoho.addTimelog.bind(zoho)
+		zoho.addTimelog = async (a: { from?: string }) => {
+			if (a.from) throw new ZohoError('Error in adding Timelog')
+			return real(a)
+		}
+		expect(await cmd.pushDay('2026-10-12', [row])).toMatchObject({ status: 'pushed', done: [0] })
+		expect(zoho.logged).toEqual([expect.not.objectContaining({ from: expect.anything() })])
+	})
 })
 
 describe('tasks and timer', () => {

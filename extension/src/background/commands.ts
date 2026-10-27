@@ -38,6 +38,7 @@ import { hoursFor } from '@/core/leave'
 import { overtime, overtimeLine, type Overtime, type WorkedDay } from '@/core/overtime'
 import { periodReport, periodText, spanFrom, type PeriodReport, type Span } from '@/core/period'
 import { countKinds, findAll, type Hit, type HitKind } from '@/core/find'
+import { matchBrain, parseBrainQuery } from '@/core/brain-query'
 import { fold, KIND_LABEL as BRAIN_KIND } from '@/core/bridge'
 import { isComplete, lastDays, lockLine, owedDays, streakOf, type DayState, type Owed, type Streak } from '@/core/habit'
 import { leftAt, regularisationNote } from '@/core/closeout'
@@ -3417,7 +3418,20 @@ export class DayCommands {
 		const today = istDate(this.now())
 		const from = addDays(today, -days)
 		const [tickets, tasks, learnings, rt] = await Promise.all([this.store.workspaces(), this.store.tasks(), this.store.learnings(), this.store.runtime()])
-		const brain = [...(rt.bridge?.queue ?? []), ...fold(rt.bridge?.files ?? {})]
+		const all = [...new Map([...(rt.bridge?.queue ?? []), ...fold(rt.bridge?.files ?? {})].map((e) => [e.id, e])).values()]
+		const asHay = (list: typeof all) => list.map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: BRAIN_KIND[e.kind] ?? e.kind, ticket: e.ticket, at: e.at, more: [e.body, e.asked, e.done, e.rootCause, e.project, ...(e.tags ?? []), ...(e.next ?? [])].filter(Boolean).join(' ') }))
+		// `ticket:`, `type:`, `has:next-action` … are about the Brain: with any of
+		// them, the search is the Brain's alone, and filters with no words list
+		// everything that passes, newest first.
+		const q = parseBrainQuery(query, this.now())
+		if (q.filtered) {
+			const pool = asHay(all.filter((e) => matchBrain(e, q.filters)))
+			const none = { entries: [], notes: [], learnings: [], tickets: [], links: [], tasks: [] }
+			const hits = q.text.trim().length >= 2
+				? findAll(q.text, { ...none, brain: pool })
+				: pool.sort((a, b) => b.at - a.at).slice(0, 60).map((b): Hit => ({ kind: 'brain', text: b.subtitle ? `${b.title} — ${b.subtitle}` : b.title, where: [b.kind, b.ticket].filter(Boolean).join(' · '), at: b.at, score: 1, hash: b.ticket ? `#/brain/${b.ticket}` : '#/brain' }))
+			return { hits, kinds: countKinds(hits) }
+		}
 		const entries: { date: string; text: string; slotStart: number }[] = []
 		for (let d = from; d <= today; d = addDays(d, 1)) {
 			for (const e of await this.store.entries(d)) entries.push({ date: d, text: e.text, slotStart: e.slotStart })
@@ -3429,7 +3443,7 @@ export class DayCommands {
 			tickets: tickets.map((w) => ({ id: w.id, name: w.name, at: w.updatedAt ?? w.at })),
 			links: tickets.flatMap((w) => w.tabs.map((t) => ({ ticketId: w.id, ticketName: w.name, title: t.title, url: t.url, note: t.note, addedAt: t.addedAt }))),
 			tasks: tasks.map((t) => ({ uid: t.uid, title: t.title, key: t.key, status: t.status, createdAt: t.createdAt })),
-			brain: [...new Map(brain.map((e) => [e.id, e])).values()].map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: BRAIN_KIND[e.kind] ?? e.kind, ticket: e.ticket, at: e.at, more: [e.body, e.asked, e.done, e.rootCause, e.project, ...(e.tags ?? []), ...(e.next ?? [])].filter(Boolean).join(' ') })),
+			brain: asHay(all),
 		})
 		return { hits, kinds: countKinds(hits) }
 	}

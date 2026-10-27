@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 
 import type { PushResult } from '@/background/review-commands'
-import { minutesFromHHMM, rowsPerEntry, splitRows } from '@/core/rules'
+import { entryBlocks, minutesFromHHMM, rowsPerTask, splitRows } from '@/core/rules'
 import { addDays, fmtMinutes, hhmm, istDate, istTime, prettyDate } from '@/core/time'
 import { fileName, SHEET_LABEL, timesheet, type SheetFormat } from '@/core/export'
 import { ticketKey } from '@/core/links'
@@ -50,7 +50,13 @@ interface Row {
 	jobId: string
 	hours: string
 	description: string
+	/** The row's real start and end, when its hours are one unbroken stretch. */
+	from?: number
+	to?: number
 }
+
+/** Times stay only while the hours still match them; an edited row goes as hours. */
+const spanFits = (x: Row) => x.from != null && x.to != null && Math.round((x.to - x.from) / 60_000) === minutesFromHHMM(x.hours)
 
 const STATUS = {
 	pending: { label: 'Not logged yet', cls: 'wp-chip-warn' },
@@ -70,7 +76,7 @@ export function ReviewView({ date }: { date?: string }) {
 	const { data: wiring, reload: reloadWiring } = useLive(() => call('wiring'))
 	/** Which entries this push covers. Null until the day loads, then everything unsynced. */
 	const [picked, setPicked] = useState<Set<string> | null>(null)
-	/** How the day is cut into rows: one per job, or one per entry; and a cap. */
+	/** How the day is cut into rows: one per job, or one per task (the same task in several hours is one row); and a cap. */
 	const [perEntry, setPerEntry] = useState(false)
 	const [maxHours, setMaxHours] = useState(0)
 
@@ -88,8 +94,8 @@ export function ReviewView({ date }: { date?: string }) {
 		const chosenEntries = r.entries.filter((e) => picked.has(e.uid))
 		// The cut works from the entries, not from a grouped row: each row has to
 		// carry the work that happened in it, not a copy of the whole day.
-		const built = perEntry ? rowsPerEntry(chosenEntries, r.jobs) : splitRows(chosenEntries, r.jobs, maxHours * 60)
-		setRows(built.map((x) => ({ jobId: x.jobId ?? '', hours: hhmm(x.minutes), description: x.description })))
+		const built = perEntry ? rowsPerTask(chosenEntries, r.jobs) : splitRows(chosenEntries, r.jobs, maxHours * 60)
+		setRows(built.map((x) => ({ jobId: x.jobId ?? '', hours: hhmm(x.minutes), description: x.description, from: x.from, to: x.to })))
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pickedKey, rowsKey, perEntry, maxHours])
 
@@ -130,7 +136,7 @@ export function ReviewView({ date }: { date?: string }) {
 			const res = await call(
 				'pushDay',
 				r.date,
-				rows.map((x) => ({ jobId: x.jobId || undefined, minutes: minutesFromHHMM(x.hours) ?? 0, description: x.description })),
+				rows.map((x) => ({ jobId: x.jobId || undefined, minutes: minutesFromHHMM(x.hours) ?? 0, description: x.description, ...(spanFits(x) ? { from: x.from, to: x.to } : {}) })),
 				chosen.map((e) => e.uid),
 			)
 			setResult(res)
@@ -257,7 +263,7 @@ export function ReviewView({ date }: { date?: string }) {
 							One per job
 						</button>
 						<button aria-pressed={perEntry} disabled={done} onClick={() => setPerEntry(true)}>
-							One per entry
+							One per task
 						</button>
 					</div>
 				</span>
@@ -352,6 +358,11 @@ export function ReviewView({ date }: { date?: string }) {
 											aria-invalid={minutesFromHHMM(x.hours) == null}
 											onChange={(e) => setRow(i, { hours: e.target.value })}
 										/>
+										{spanFits(x) && (
+											<div className="wp-muted wp-small wp-num" style={{ whiteSpace: 'nowrap' }} title={s.settings.timelogTimes ? 'Sent to Zoho with this start and end' : 'Sent as hours (Settings → send the real start and end time is off)'}>
+												{istTime(x.from!)}–{istTime(x.to!)}
+											</div>
+										)}
 									</td>
 									<td>
 										<textarea className="wp-textarea" style={{ minHeight: 0 }} rows={Math.max(2, Math.ceil(x.description.length / 58))} value={x.description} disabled={done} onChange={(e) => setRow(i, { description: e.target.value })} />
@@ -463,53 +474,69 @@ export function ReviewView({ date }: { date?: string }) {
 				</div>
 				{r.entries.length ? (
 					<div className="wp-timeline wp-scroll">
-						{r.entries.map((e) => (
-							<div key={e.uid} className="wp-tl-item">
-								<span className="wp-num wp-muted">
-									{e.kind === 'work' &&
-										(e.synced ? (
-											<span className="wp-chip wp-chip-ok" title="Already in Zoho">
-												<span className="wp-dot" />
+						{/* Back-to-back hours of one task are one line: the box asks every
+						    hour, but three hours on the retry fix were one piece of work. */}
+						{entryBlocks(r.entries).map((b) => {
+							const e = b.entries[0]
+							const many = b.uids.length > 1
+							const on = b.uids.every((u) => picked?.has(u))
+							return (
+								<div key={b.uids.join('|')} className="wp-tl-item">
+									<span className="wp-num wp-muted">
+										{e.kind === 'work' &&
+											(e.synced ? (
+												<span className="wp-chip wp-chip-ok" title="Already in Zoho">
+													<span className="wp-dot" />
+												</span>
+											) : (
+												<input
+													type="checkbox"
+													aria-label={`Include ${b.text}`}
+													checked={on}
+													onChange={(ev) =>
+														setPicked((p) => {
+															const next = new Set(p ?? [])
+															for (const u of b.uids) ev.target.checked ? next.add(u) : next.delete(u)
+															return next
+														})
+													}
+												/>
+											))}{' '}
+										{istTime(b.slotStart)} – {istTime(b.slotEnd)}
+									</span>
+									<span>
+										{b.text || e.text} {e.kind !== 'work' && <span className="wp-chip">{e.kind === 'break' ? 'Break' : 'Skipped'}</span>}
+										{/* A line you did not write must never be indistinguishable
+										    from one you did. */}
+										{e.auto && (
+											<span className="wp-chip" title="Added for you because this meeting recurs. Delete it if it did not happen.">
+												Added for you
 											</span>
-										) : (
-											<input
-												type="checkbox"
-												aria-label={`Include ${e.text}`}
-												checked={picked?.has(e.uid) ?? false}
-												onChange={(ev) =>
-													setPicked((p) => {
-														const next = new Set(p ?? [])
-														if (ev.target.checked) next.add(e.uid)
-														else next.delete(e.uid)
-														return next
+										)}
+										{many && <div className="wp-muted wp-small">{b.uids.length} hourly entries, one task</div>}
+										{e.jobId && <div className="wp-muted wp-small">{jobName.get(e.jobId) ?? e.jobId}</div>}
+									</span>
+									<span className="wp-row">
+										{e.kind === 'work' && <span className="wp-num">{fmtMinutes(b.minutes)}</span>}
+										{e.kind === 'work' && e.synced && <span className="wp-chip wp-chip-ok">In Zoho</span>}
+										{!e.synced && (
+											<button
+												className="wp-btn wp-btn-sm wp-btn-ghost"
+												title={many ? `Deletes all ${b.uids.length} hourly entries` : undefined}
+												onClick={() =>
+													run(async () => {
+														// One at a time: each delete rewrites the same day.
+														for (const u of b.uids) await call('deleteEntry', r.date, u)
 													})
 												}
-											/>
-										))}{' '}
-									{istTime(e.slotStart)} – {istTime(e.slotEnd)}
-								</span>
-								<span>
-									{e.text} {e.kind !== 'work' && <span className="wp-chip">{e.kind === 'break' ? 'Break' : 'Skipped'}</span>}
-									{/* A line you did not write must never be indistinguishable
-									    from one you did. */}
-									{e.auto && (
-										<span className="wp-chip" title="Added for you because this meeting recurs. Delete it if it did not happen.">
-											Added for you
-										</span>
-									)}
-									{e.jobId && <div className="wp-muted wp-small">{jobName.get(e.jobId) ?? e.jobId}</div>}
-								</span>
-								<span className="wp-row">
-									{e.kind === 'work' && <span className="wp-num">{fmtMinutes(e.minutes)}</span>}
-									{e.kind === 'work' && e.synced && <span className="wp-chip wp-chip-ok">In Zoho</span>}
-									{!e.synced && (
-										<button className="wp-btn wp-btn-sm wp-btn-ghost" onClick={() => run(() => call('deleteEntry', r.date, e.uid))}>
-											Delete
-										</button>
-									)}
-								</span>
-							</div>
-						))}
+											>
+												{many ? `Delete ${b.uids.length}` : 'Delete'}
+											</button>
+										)}
+									</span>
+								</div>
+							)
+						})}
 					</div>
 				) : (
 					<div className="wp-muted">No entries.</div>

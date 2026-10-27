@@ -9,6 +9,7 @@
 import type { Entry, Job, Task } from './types'
 import { addDays, fmtMinutes, istDate } from './time'
 import { ticketKey } from './links'
+import { resolveTasks, taskKey } from './rules'
 
 export interface StandupLine {
 	/** The ticket key or job name this belongs to. */
@@ -44,13 +45,17 @@ export function standup(input: StandupInput, date: string): Standup {
 	const names = new Map(input.jobs.map((j) => [j.id, j.name]))
 	const lines = new Map<string, StandupLine>()
 	let minutes = 0
+	// "same" and "continued" are the task before, and one task is said once.
+	const day = input.entries.filter((x) => x.date === date && x.kind === 'work' && x.minutes > 0).sort((a, b) => a.slotStart - b.slotStart)
+	const tasks = resolveTasks(day)
 
-	for (const e of input.entries.filter((x) => x.date === date && x.kind === 'work' && x.minutes > 0).sort((a, b) => a.slotStart - b.slotStart)) {
-		const key = ticketKey(e.text) ?? (e.jobId ? (names.get(e.jobId) ?? e.jobId) : 'Other')
+	for (const e of day) {
+		const said = tasks.get(e.uid) ?? e.text
+		const key = ticketKey(said) ?? (e.jobId ? (names.get(e.jobId) ?? e.jobId) : 'Other')
 		const line = lines.get(key) ?? { label: key, minutes: 0, said: [] }
 		line.minutes += e.minutes
-		const text = cleanSaid(e.text, key)
-		if (text && !line.said.includes(text)) line.said.push(text)
+		const text = cleanSaid(said, key)
+		if (text && !line.said.some((x) => taskKey(x) === taskKey(text))) line.said.push(text)
 		lines.set(key, line)
 		minutes += e.minutes
 	}

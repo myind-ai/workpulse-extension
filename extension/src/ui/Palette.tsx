@@ -31,6 +31,8 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 	const [tickets, setTickets] = useState<{ id: string; name: string }[]>([])
 	const [groups, setGroups] = useState<{ id: string; name: string; count: number }[]>([])
 	const [here, setHere] = useState<{ text: string; author: string; state: string; localId?: string }[]>([])
+	// What the Brain has for this page: its ticket, its pull request, its repo.
+	const [related, setRelated] = useState<{ total: number; about: string; entries: { id: string; title: string; kind: string; ticket?: string; next?: string[]; rootCause?: string }[] } | null>(null)
 	// The slot the box would log against, and how much of it to claim.
 	const [slot, setSlot] = useState<{ label: string; minutes: number; total: number; jobId: string; jobs: { id: string; name: string }[] } | null>(null)
 	const [mins, setMins] = useState<number | null>(null)
@@ -131,6 +133,7 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 		if (mode === 'page') {
 			if (!page?.url) return
 			void call('notesOnPage', page.url).then((r) => setHere(r.notes.map((n) => ({ text: n.text, author: n.author, state: n.state, localId: n.localId }))))
+			void call('relatedContext', page.url, page.title).then((r) => setRelated(r.total ? { total: r.total, about: r.keys[0] ?? r.repo ?? 'this page', entries: r.entries } : null), () => setRelated(null))
 			// Taken as the mode opens, with the box out of the way. Only when that
 			// page is the one on screen — from the dashboard it is not, and there
 			// is nothing honest to photograph.
@@ -511,6 +514,26 @@ export function Palette({ onClose, page: given }: { onClose: () => void; page?: 
 							</button>
 						))}
 					</div>
+				)}
+
+				{mode === 'page' && related && (
+					<>
+						<div className="wp-pal-group">
+							From the Brain · {related.total} for {related.about}
+						</div>
+						<div className="wp-pal-list">
+							{related.entries.map((e) => (
+								<button key={e.id} className="wp-pal-hit" onClick={() => go(e.ticket ? `#/brain/${e.ticket}` : '#/brain')}>
+									<span className="wp-pal-title">{e.title}</span>
+									<span className="wp-pal-detail">
+										{e.kind}
+										{e.ticket ? ` · ${e.ticket}` : ''}
+										{e.next?.[0] ? ` · next: ${e.next[0]}` : e.rootCause ? ` · cause: ${e.rootCause}` : ''}
+									</span>
+								</button>
+							))}
+						</div>
+					</>
 				)}
 
 				<div className="wp-pal-foot">

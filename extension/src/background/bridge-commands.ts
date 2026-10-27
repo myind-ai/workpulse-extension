@@ -10,6 +10,7 @@
 
 import { appendLine, changedFiles, devicesOf, entriesPath, fold, inboxPath, newEntry, secretsIn, summarise, type BridgeEntry, type Device, type InboxMessage, type Summary } from '@/core/bridge'
 import { brainRecord, openWork, type OpenWork } from '@/core/brain-index'
+import { relatedTo } from '@/core/brain-query'
 import { enabled } from '@/core/features'
 import { parseRepo } from '@/core/sync'
 import { GitHub } from '@/lib/github'
@@ -230,6 +231,23 @@ export class BridgeCommands extends PageCommands {
 			: [{ title: `${key} in the Brain`, url: chrome.runtime.getURL(`/dashboard.html#/brain/${key}`) }]
 		const space = await this.saveWorkspace({ name: `${key} ${record.title}`.slice(0, 120), tabs, note: record.asked })
 		return { id: space.id }
+	}
+
+	/**
+	 * What the Brain has for the page you are on: entries that link to it, ones
+	 * for a ticket it names, and on code or environment hosts, ones for its
+	 * repository or host. No network: it reads what the last sync left.
+	 */
+	async relatedContext(url: string, title?: string): Promise<{ keys: string[]; repo?: string; total: number; entries: (Pick<BridgeEntry, 'id' | 'title' | 'kind' | 'ticket' | 'at' | 'rootCause' | 'next' | 'subtitle'> & { why: string })[] }> {
+		if (!enabled('BRIDGE_SYNC')) return { keys: [], total: 0, entries: [] }
+		const all = (await this.bridge()).entries
+		const r = relatedTo(all, { url, title }, 50)
+		return {
+			keys: r.keys,
+			repo: r.repo,
+			total: r.entries.length,
+			entries: r.entries.slice(0, 8).map(({ e, why }) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: e.kind, ticket: e.ticket, at: e.at, rootCause: e.rootCause, next: e.next, why })),
+		}
 	}
 
 	/** Which of these ticket keys already has a ticket on the Tickets page. */

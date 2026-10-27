@@ -8,6 +8,10 @@ description: Keep a running memory of every ticket, bug, debugging session, repo
 One private GitHub repository holds a `bridge/` folder that both the WorkPulse extension (Brain page) and this skill read and write.
 Each device writes only its own file, so nothing conflicts. The tool is `wp-brain` (`cli/wp-brain.mjs` in the WorkPulse repo, Node ≥ 22.18).
 
+In the browser the same Brain shows up where the work is: on a Jira ticket, pull request, staging or localhost
+page the extension shows what was recorded for it (next action, root cause), and the palette's **Save context**
+(`+`) and **This page** modes write and list entries for that page.
+
 Every entry also gets a readable Markdown record under `bridge/records/<device>/YYYY-MM/`, written once by the device that wrote the entry (so every file keeps one writer). Its filename comes from the ticket and title; its front matter carries subtitle, type, scope, device, tags, status and links; its body uses headings such as **Summary**, **Done**, **Root cause**, and **Next action**. JSONL remains the sync source. Entry kinds include `decision` and `handover` as well as ticket, learning, mistake, debug, report, code, skill, note.
 
 ```bash
@@ -78,11 +82,29 @@ The brief also includes what the user wrote on the extension's Learnings page (f
 2. Run the brief and **read it before planning**:
 
 ```bash
-node $WP brief PAY-2433 --project acme/payments-web
+node $WP brief PAY-2433 --project acme/payments-web --about "webhook retry"   # --about: the task in 2-4 words
 ```
 
-It shows earlier entries for that ticket and its related ones, the mistakes that keep coming back (30 days),
-open follow-ups, and requests the user sent from the extension's inbox. Say in one line what you are taking from it.
+It shows earlier entries for that ticket and its related ones, **what was learned before about the same subject
+under other tickets** (`--about`; the SessionStart hook uses the branch's words), the mistakes that keep coming
+back (30 days), open follow-ups, and requests the user sent from the extension's inbox. Say in one line what you
+are taking from it.
+
+3. When the task touches something that has gone wrong before, or the user asks "have I seen this", search
+before guessing. Filters narrow it; the rest are words:
+
+```bash
+node $WP search "idempotency retry"                       # ranked: title, then subtitle and tags, then the rest
+node $WP search "type:mistake #forms"                     # every mistake tagged forms
+node $WP search "ticket:PAY-2433 has:next-action"         # where that ticket was left
+node $WP search "repo:payments status:open after:14d"     # open work on a repo, last two weeks
+node $WP search "type:debug has:root-cause timeout"       # diagnosed timeouts, with their causes
+```
+
+Filters: `ticket:` `type:` (ticket, learning, mistake, debug, decision, handover, report, code, skill, note)
+`status:open|done` `repo:` `tag:` or `#tag` `after:`/`before:` (`2026-10-01` or `7d`, `2w`)
+`has:next-action|pr|root-cause|links` `scope:work|personal`. The same filters work in the extension's search
+box (Alt+Shift+K) and on its Brain page.
 If an inbox item is handled, acknowledge it: `node $WP inbox --ack <id>`.
 
 For personal productivity work, use `--scope personal --project <name>` and read the matching brief before planning. Preserve a concrete **next** step whenever work remains open; it is the resume point for the next session.
@@ -97,6 +119,8 @@ Record the moment it happens, not at the end, when one of these occurs:
 | A bug was diagnosed | `node $WP add debug "symptom" --subtitle "one-line impact" --ticket K --root-cause "cause" --body "fix and the command that proved it"` |
 | Something reusable was learned | `node $WP add learning "the lesson #tag"` |
 | A new skill/tool was set up | `node $WP add skill "what, and where the notes are"` |
+| A choice between options was made | `node $WP add decision "chose X over Y" --ticket K --body "why, and what would change it"` |
+| Handing work to someone (or to tomorrow) | `node $WP add handover "where it stands" --ticket K --status "in progress" --next "first thing to do"` |
 
 Use `--scope personal --project <name>` for side projects outside work.
 

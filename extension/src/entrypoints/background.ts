@@ -781,10 +781,41 @@ export default defineBackground(() => {
 	}
 	chrome.tabs.onRemoved.addListener((tabId) => toldOn.delete(tabId))
 
+	/**
+	 * Arriving on a ticket, a pull request, staging or localhost the Brain knows.
+	 *
+	 * What you or Claude Code wrote last time — the next action, the root cause —
+	 * is worth most at the moment you are back on the thing. Once per tab per
+	 * page, and never over a page note, which is the more specific of the two.
+	 */
+	const toldBrain = new Map<number, string>()
+	const markRelated = async (tabId: number, url?: string, title?: string) => {
+		if (!url || !/^https?:/.test(url)) return
+		const where = `${url.split('#')[0]}`
+		if (toldBrain.get(tabId) === where) return
+		if (!(await store.settings()).brainOnPages) return
+		const r = await commands.relatedContext(url, title).catch(() => null)
+		if (!r?.total) return
+		if ((await commands.noteCount(url).catch(() => ({ open: 0 }))).open) return
+		toldBrain.set(tabId, where)
+		const about = r.keys[0] ?? r.repo ?? 'this page'
+		const next = r.entries.find((e) => e.next?.some(Boolean))
+		const cause = r.entries.find((e) => e.rootCause)
+		const lines = [
+			next && `Next: ${next.next!.filter(Boolean)[0]}`,
+			cause && `Root cause before: ${cause.rootCause}`,
+			...r.entries.filter((e) => e !== next && e !== cause).slice(0, next || cause ? 1 : 3).map((e) => `${e.kind}: ${e.title}`),
+			r.total > 3 && `${r.total} in all — Alt+Shift+K → This page`,
+		].filter((x): x is string => !!x).map((x) => x.slice(0, 180))
+		await chrome.scripting.executeScript({ target: { tabId }, func: showBubble, args: [`Brain: ${r.total} record${r.total === 1 ? '' : 's'} for ${about}`, lines, true] }).catch(() => undefined)
+	}
+	chrome.tabs.onRemoved.addListener((tabId) => toldBrain.delete(tabId))
+
 	// Forced UI follows you: every tab you switch to shows it until you answer.
 	chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 		const tab = await chrome.tabs.get(tabId).catch(() => null)
 		void markNotes(tabId, tab?.url)
+		void markRelated(tabId, tab?.url, tab?.title)
 		void markStray(tabId, tab?.url)
 		if (!(await store.runtime()).pending) return
 		await presenter.poke(tabId, tab?.url)
@@ -792,6 +823,7 @@ export default defineBackground(() => {
 	chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
 		if (info.status !== 'complete' || !tab.active) return
 		void markNotes(tabId, tab.url)
+		void markRelated(tabId, tab.url, tab.title)
 		void markStray(tabId, tab.url)
 		if ((await store.runtime()).pending) await presenter.poke(tabId, tab.url)
 	})

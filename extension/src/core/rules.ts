@@ -38,6 +38,25 @@ export interface ReviewRow {
 	minutes: number
 	hours: number
 	description: string
+	/** When the row's entries are one unbroken stretch that fills its time: from and to (epoch ms), for Zoho's fromTime/toTime. */
+	from?: number
+	to?: number
+}
+
+/**
+ * From and to, when these entries are one unbroken stretch and every minute of
+ * it is claimed: 10:00–11:00 and 11:00–12:00 at 60 min each are 10:00–12:00.
+ * A gap, or an hour only partly claimed (45 of 60 min — which 45?), has no
+ * honest start and end, so it gets none and goes as hours.
+ */
+export function spanOf(list: Entry[]): { from: number; to: number } | undefined {
+	const work = list.filter((e) => e.kind === 'work' && e.minutes > 0).sort((a, b) => a.slotStart - b.slotStart)
+	if (!work.length) return undefined
+	for (let i = 1; i < work.length; i++) if (work[i].slotStart - work[i - 1].slotEnd > 60_000) return undefined
+	const from = work[0].slotStart
+	const to = work[work.length - 1].slotEnd
+	const claimed = work.reduce((n, e) => n + e.minutes, 0)
+	return Math.abs((to - from) / 60_000 - claimed) <= 1 ? { from, to } : undefined
 }
 
 /**
@@ -51,21 +70,67 @@ export interface ReviewRow {
  */
 const rowKey = (e: Entry) => (e.meetingId ? `meeting:${e.meetingId}` : e.jobId || '')
 
+/**
+ * Two lines that say the same thing are one task: "Fix retry bug." and
+ * "fix  retry bug" differ only in case, spacing and the full stop.
+ */
+export function taskKey(text: string): string {
+	return text
+		.normalize('NFKC')
+		.toLowerCase()
+		.replace(/\s+/g, ' ')
+		.replace(/^[\s\-–—•*·]+|[\s.,;:!…]+$/g, '')
+		.trim()
+}
+
+/** What people type in the hourly box to mean "still the task before". */
+const CONTINUES = /^(same|same task|same as (before|above|previous|earlier|last( hour| one| time)?)|continued?|continuing|cont'?d|contd\.?|cont\.?|ditto|still on (it|that|this)|"|〃|\.{2,3}|-{1,2})$/i
+export const continues = (text: string): boolean => CONTINUES.test(text.trim())
+
+/**
+ * Each work entry's task in words, in time order, with "same" or "continued"
+ * replaced by the task it continues: the last one in the same row (job or
+ * meeting), or else the last one at all. A task is worded as it was first written.
+ */
+export function resolveTasks(entries: Entry[]): Map<string, string> {
+	const out = new Map<string, string>()
+	const lastIn = new Map<string, string>()
+	// One wording per task: the way it was first written that day.
+	const first = new Map<string, string>()
+	let last = ''
+	for (const e of [...entries].sort((a, b) => a.slotStart - b.slotStart)) {
+		if (e.kind !== 'work') continue
+		let text = e.text.trim()
+		if (text && continues(text)) text = lastIn.get(rowKey(e)) ?? (last || text)
+		if (text && !first.has(taskKey(text))) first.set(taskKey(text), text)
+		text = first.get(taskKey(text)) ?? text
+		out.set(e.uid, text)
+		if (text && !continues(text)) {
+			lastIn.set(rowKey(e), text)
+			last = text
+		}
+	}
+	return out
+}
+
 /** Groups `work` entries by job in order of first appearance, meetings apart. */
 export function groupEntries(entries: Entry[], jobs: Job[]): ReviewRow[] {
 	const names = new Map(jobs.map((j) => [j.id, j.name]))
-	const groups = new Map<string, { jobId?: string; minutes: number; texts: string[] }>()
+	const tasks = resolveTasks(entries)
+	const groups = new Map<string, { jobId?: string; minutes: number; texts: string[]; seen: Set<string>; list: Entry[] }>()
 	for (const e of entries) {
 		if (e.kind !== 'work' || e.minutes <= 0) continue
 		const key = rowKey(e)
 		let g = groups.get(key)
 		if (!g) {
-			g = { jobId: e.jobId || undefined, minutes: 0, texts: [] }
+			g = { jobId: e.jobId || undefined, minutes: 0, texts: [], seen: new Set(), list: [] }
 			groups.set(key, g)
 		}
 		g.minutes += e.minutes
-		const text = e.text.trim()
-		if (text && !g.texts.includes(text)) g.texts.push(text)
+		g.list.push(e)
+		// The same task logged in three hours is named once.
+		const text = tasks.get(e.uid) ?? e.text.trim()
+		if (text && !g.seen.has(taskKey(text))) (g.seen.add(taskKey(text)), g.texts.push(text))
 	}
 	return [...groups.values()].map((g) => ({
 		jobId: g.jobId,
@@ -73,22 +138,23 @@ export function groupEntries(entries: Entry[], jobs: Job[]): ReviewRow[] {
 		minutes: g.minutes,
 		hours: round2(g.minutes / 60),
 		description: g.texts.join('; '),
+		...spanOf(g.list),
 	}))
 }
 
 /**
- * A job's time cut into rows of at most `maxMinutes`, **carrying the work that
- * actually happened in each one**.
+ * A job's time in rows of at most `maxMinutes`, **without ever cutting a task**.
  *
- * Splitting the total and copying the merged description into every row — which
- * is what this used to do — produces four identical lines that say everything
- * and mean nothing. Entries are logged through the day with their own text, so
- * the rows are filled in time order from those entries: the first hour says what
- * you did in the first hour. An entry that straddles a boundary is named in both
- * rows, because it genuinely was in both.
+ * Rows are filled with whole tasks in the order they were started: when the
+ * next task would take a row over the cap, it starts a new row. A task that
+ * is longer than the cap on its own is one row anyway — three hours on the
+ * webhook retry are one line of 3:00, not three lines saying the same thing,
+ * which is what cutting the total used to do. With no cap, one row per job
+ * (a meeting apart). Every task is named once.
  */
 export function splitRows(entries: Entry[], jobs: Job[], maxMinutes: number): ReviewRow[] {
 	const names = new Map(jobs.map((j) => [j.id, j.name]))
+	const tasks = resolveTasks(entries)
 	const order: string[] = []
 	const byJob = new Map<string, Entry[]>()
 	for (const e of entries) {
@@ -104,63 +170,121 @@ export function splitRows(entries: Entry[], jobs: Job[], maxMinutes: number): Re
 	const out: ReviewRow[] = []
 	for (const key of order) {
 		const list = [...byJob.get(key)!].sort((a, b) => a.slotStart - b.slotStart)
-		const total = list.reduce((n, e) => n + e.minutes, 0)
-		// Even chunks, with the remainder spread a minute at a time rather than
-		// dumped on the last row, so the total never changes.
-		const parts = maxMinutes > 0 && total > maxMinutes ? Math.ceil(total / maxMinutes) : 1
-		const base = Math.floor(total / parts)
-		const spare = total - base * parts
-		const sizes = Array.from({ length: parts }, (_, i) => base + (i < spare ? 1 : 0))
-
 		// The grouping key is not the job any more — a meeting has its own — so
 		// the job is read from the entries in the group.
 		const jobId = list[0]?.jobId || ''
-		const row = (minutes: number, texts: string[]): ReviewRow => ({
-			jobId: jobId || undefined,
-			jobName: jobId ? (names.get(jobId) ?? jobId) : 'No job',
-			minutes,
-			hours: round2(minutes / 60),
-			description: texts.join('; '),
-		})
-
-		let at = 0
-		let left = sizes[0]
-		let texts: string[] = []
+		// The job's tasks, in the order started, each with all of its entries.
+		const byTask = new Map<string, { text: string; list: Entry[]; minutes: number }>()
 		for (const e of list) {
-			let rest = e.minutes
-			const text = e.text.trim()
-			while (rest > 0) {
-				if (text && !texts.includes(text)) texts.push(text)
-				const take = Math.min(rest, left)
-				rest -= take
-				left -= take
-				if (left === 0 && at < parts - 1) {
-					out.push(row(sizes[at], texts))
-					texts = []
-					at++
-					left = sizes[at]
-				} else if (left === 0) {
-					break // the last row takes whatever is left over
-				}
-			}
+			const text = tasks.get(e.uid) ?? e.text.trim()
+			const k = taskKey(text)
+			const t = byTask.get(k) ?? { text, list: [], minutes: 0 }
+			t.list.push(e)
+			t.minutes += e.minutes
+			byTask.set(k, t)
 		}
-		out.push(row(sizes[at], texts))
+		let row: { texts: string[]; list: Entry[]; minutes: number } | null = null
+		const flush = () => {
+			if (!row) return
+			out.push({
+				jobId: jobId || undefined,
+				jobName: jobId ? (names.get(jobId) ?? jobId) : 'No job',
+				minutes: row.minutes,
+				hours: round2(row.minutes / 60),
+				description: row.texts.filter(Boolean).join('; '),
+				...spanOf(row.list),
+			})
+			row = null
+		}
+		for (const t of byTask.values()) {
+			if (row && maxMinutes > 0 && row.minutes + t.minutes > maxMinutes) flush()
+			row ??= { texts: [], list: [], minutes: 0 }
+			row.texts.push(t.text)
+			row.list.push(...t.list)
+			row.minutes += t.minutes
+		}
+		flush()
 	}
 	return out
 }
 
-/** Every entry as its own line, for people whose reviewers want the detail. */
-export function rowsPerEntry(entries: Entry[], jobs: Job[]): ReviewRow[] {
+/**
+ * One line per task, for people whose reviewers want the detail.
+ *
+ * Not one per entry: the hourly box asks every hour, so a task that took three
+ * hours is three entries, and three identical lines on a timesheet are the
+ * confusion this was meant to avoid. The same task under the same job (or
+ * meeting) is one line with its time added up — 1 h, then 2 h, then 3 h as the
+ * hours go by — named as it was first written. "Same" or "continued" count as
+ * the task before. Lines come in the order the tasks were started.
+ */
+export function rowsPerTask(entries: Entry[], jobs: Job[]): ReviewRow[] {
 	const names = new Map(jobs.map((j) => [j.id, j.name]))
-	return entries
-		.filter((e) => e.kind === 'work' && e.minutes > 0)
-		.map((e) => ({
+	const tasks = resolveTasks(entries)
+	const rows = new Map<string, ReviewRow>()
+	const lists = new Map<string, Entry[]>()
+	for (const e of [...entries].sort((a, b) => a.slotStart - b.slotStart)) {
+		if (e.kind !== 'work' || e.minutes <= 0) continue
+		const text = tasks.get(e.uid) ?? e.text.trim()
+		const key = `${rowKey(e)}|${taskKey(text)}`
+		lists.set(key, [...(lists.get(key) ?? []), e])
+		const row = rows.get(key)
+		if (row) {
+			row.minutes += e.minutes
+			row.hours = round2(row.minutes / 60)
+			continue
+		}
+		rows.set(key, {
 			jobId: e.jobId || undefined,
 			jobName: e.jobId ? names.get(e.jobId) ?? e.jobId : 'No job',
 			minutes: e.minutes,
 			hours: round2(e.minutes / 60),
-			description: e.text.trim(),
-		}))
+			description: text,
+		})
+	}
+	return [...rows].map(([key, row]) => ({ ...row, ...spanOf(lists.get(key)!) }))
+}
+
+export interface EntryBlock {
+	/** Every entry in it, in time order: ticking or deleting the block is all of them. */
+	uids: string[]
+	entries: Entry[]
+	slotStart: number
+	slotEnd: number
+	minutes: number
+	/** The task, as first written ("same as last hour" resolved). */
+	text: string
+}
+
+/**
+ * The day's log as you would say it: back-to-back hours of the same task,
+ * under the same job, are one line — 10:00–13:00 · 3h — not three. Only
+ * entries in the same state join: synced with synced, added-for-you with
+ * added-for-you. A break, a skip or a different task starts a new line.
+ */
+export function entryBlocks(entries: Entry[]): EntryBlock[] {
+	const tasks = resolveTasks(entries)
+	const out: EntryBlock[] = []
+	let prev: Entry | undefined
+	for (const e of [...entries].sort((a, b) => a.slotStart - b.slotStart)) {
+		const text = e.kind === 'work' ? (tasks.get(e.uid) ?? e.text.trim()) : e.text.trim()
+		const last = out[out.length - 1]
+		const joins =
+			!!last && !!prev && e.kind === 'work' && prev.kind === 'work' &&
+			rowKey(e) === rowKey(prev) && taskKey(text) === taskKey(last.text) &&
+			!!e.synced === !!prev.synced && !!e.auto === !!prev.auto &&
+			e.slotStart - prev.slotEnd <= 60_000
+		if (joins) {
+			last.uids.push(e.uid)
+			last.entries.push(e)
+			last.slotEnd = Math.max(last.slotEnd, e.slotEnd)
+			last.minutes += e.minutes
+		} else {
+			out.push({ uids: [e.uid], entries: [e], slotStart: e.slotStart, slotEnd: e.slotEnd, minutes: e.kind === 'work' ? e.minutes : 0, text })
+		}
+		prev = e
+	}
+	return out
 }
 
 export interface DayReport {
