@@ -8,6 +8,8 @@ import type { Tier } from './licence'
 
 export type ZohoMode = 'reminder' | 'timelogs' | 'full'
 export type DataCenter = 'in' | 'com' | 'eu' | 'com.au'
+/** How WorkPulse decides when to ask about an unlogged stretch. */
+export type PromptCadence = 'hourly' | 'interval' | 'smart'
 
 export interface Settings {
 	shiftStart: string // "09:00" IST
@@ -15,6 +17,7 @@ export interface Settings {
 	graceMinutes: number
 	minHours: number
 	promptInterval: number // minutes
+	promptCadence: PromptCadence
 	workDays: number[] // 1 = Monday … 7 = Sunday
 	email: string
 	defaultJobId: string
@@ -141,6 +144,9 @@ export const DEFAULT_SETTINGS: Settings = {
 	graceMinutes: 15,
 	minHours: 8,
 	promptInterval: 60,
+	// Existing installs have always used this value as their cadence; keep that
+	// behaviour after adding the three explicit choices.
+	promptCadence: 'interval',
 	workDays: [1, 2, 3, 4, 5],
 	email: '',
 	defaultJobId: '',
@@ -235,6 +241,8 @@ export interface Entry {
 	auto?: boolean
 	/** The meeting it came from, so removing the row un-logs that meeting too. */
 	meetingId?: string
+	/** Idempotency key for a work interval imported from Claude Code. */
+	bridgeWorklogId?: string
 }
 
 export type IssueKind = 'absent' | 'missing_checkout' | 'short_hours'
@@ -424,6 +432,8 @@ export interface Runtime {
 		error?: string
 		/** Entries saved while there was no repository or no network, sent on the next sync. */
 		queue?: BridgeEntry[]
+		/** Work-log records already imported from Claude Code. */
+		importedWorklogs?: string[]
 	}
 	/** The newest release GitHub reported, when it was asked, which one was dismissed, and the version that ran last. */
 	update?: { latest?: Release; checkedAt?: number; dismissed?: string; seen?: string; error?: string }

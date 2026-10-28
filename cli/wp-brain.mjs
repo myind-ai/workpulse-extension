@@ -36,6 +36,8 @@
 //                                  --plugin: from the plugin — offers the link when nothing is set up)
 //   wp-brain stop-check [--plugin] (Claude Code Stop hook: once per session, ask to record committed work)
 //   wp-brain sync
+//   wp-brain worklog "summary" --minutes 30 [--job ZOHO_JOB_ID] [--ticket PAY-123]
+//   wp-brain worklog "summary" --from 2026-10-28T10:00:00+05:30 --to 2026-10-28T10:45:00+05:30 [--job ZOHO_JOB_ID]
 //
 // Writing pushes at once unless --no-push. Nothing that looks like a secret is
 // ever written.
@@ -339,6 +341,30 @@ const commands = {
 		const what = inputs.length === 1 ? `${first.kind} — ${String(first.title).slice(0, 60)}` : `${inputs.length} entries${first.ticket ? ' for ' + first.ticket : ''}`
 		const pushed = commitAndPush(cfg, [...written], `bridge: ${what}`, !opt['no-push'])
 		console.log(pushed && !opt['no-push'] ? 'Pushed.' : 'Committed locally.')
+	},
+
+	/** A compact, explicit interval for WorkPulse's local timesheet. It is never
+	 * sent to Zoho by this CLI; the extension imports it and keeps the final
+	 * Zoho push behind the user's button. */
+	worklog({ pos, opt }) {
+		const text = pos.join(' ').trim()
+		if (!text) die('Usage: wp-brain worklog "what you did" --minutes 30 [--job ZOHO_JOB_ID], or --from ISO --to ISO.')
+		if (secretsIn(text).length) die('Work-log text looks like it contains a secret; it was not saved.')
+		const now = Date.now()
+		const to = opt.to ? Date.parse(String(opt.to)) : now
+		const minutes = Number(opt.minutes)
+		const from = opt.from ? Date.parse(String(opt.from)) : Number.isFinite(minutes) && minutes > 0 ? to - Math.round(minutes) * 60_000 : NaN
+		if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) die('Give a positive --minutes value, or valid --from and --to ISO times.')
+		if (to - from > 12 * 60 * 60_000) die('A work-log interval cannot be longer than 12 hours.')
+		const cfg = config()
+		pull(cfg)
+		const record = { schema: 'workpulse.worklog/1', id: crypto.randomUUID(), at: now, device: cfg.device, from, to, text: text.slice(0, 500), ...(opt.job ? { jobId: String(opt.job) } : {}), ...(opt.ticket ? { ticket: String(opt.ticket).toUpperCase() } : {}) }
+		const rel = `${ROOT}/worklogs/${new Date(from).toISOString().slice(0, 7)}/${cfg.device}.jsonl`
+		const abs = join(cfg.clone, rel)
+		mkdirSync(dirname(abs), { recursive: true })
+		writeFileSync(abs, `${existsSync(abs) ? readFileSync(abs, 'utf8').replace(/\n*$/, '\n') : ''}${JSON.stringify(record)}\n`)
+		const pushed = commitAndPush(cfg, [rel], `worklog: ${text.slice(0, 60)}`, !opt['no-push'])
+		console.log(`Work log saved: ${Math.round((to - from) / 60_000)}m${record.jobId ? ` · ${record.jobId}` : ''}${pushed && !opt['no-push'] ? ' · synced to WorkPulse' : ' · committed locally'}.`)
 	},
 
 	brief({ pos, opt }) {

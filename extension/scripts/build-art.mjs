@@ -2,6 +2,7 @@
 //
 //   node scripts/build-art.mjs           # only clips whose output is missing or older
 //   node scripts/build-art.mjs --force   # every clip
+//   node scripts/build-art.mjs --slot focus --force   # one named clip
 //
 // A master is `NN-slot.mp4` (688×464, 6 s, no audio). Each becomes
 //
@@ -29,6 +30,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const masters = join(here, '..', '..', 'assets', 'tick')
 const out = join(here, '..', 'public', 'art')
 const force = process.argv.includes('--force')
+const slot = process.argv.includes('--slot') ? process.argv[process.argv.indexOf('--slot') + 1] : undefined
 
 mkdirSync(out, { recursive: true })
 try {
@@ -45,6 +47,7 @@ const jobs = readdirSync(masters)
 		const slot = file.replace(/^\d\d-/, '').replace(/\.mp4$/, '')
 		return { slot, src: join(masters, file), webm: join(out, `${slot}.webm`), webp: join(out, `${slot}.webp`) }
 	})
+	.filter((job) => !slot || job.slot === slot)
 	.filter(({ src, webm, webp }) => force || [webm, webp].some((p) => !existsSync(p) || statSync(p).mtimeMs < statSync(src).mtimeMs))
 
 // One clip per core: each is a decode, a per-frame matte and a VP9 encode.
@@ -52,7 +55,7 @@ const queue = [...jobs]
 await Promise.all(
 	Array.from({ length: Math.max(1, cpus().length - 1) }, async () => {
 		for (let job = queue.shift(); job; job = queue.shift()) {
-			await run('python3', ['-I', join(here, 'matte-art.py'), job.src, job.webm, '320'])
+		await run('python3', ['-I', join(here, 'matte-art.py'), job.src, job.webm, '480'])
 			console.log(`  ${job.slot}`)
 		}
 	}),

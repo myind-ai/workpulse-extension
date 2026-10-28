@@ -14,6 +14,7 @@ import { relatedTo } from '@/core/brain-query'
 import { dueForCheck, readRelease, RELEASES_API, UPDATE_CMD, type Release, type UpdateState } from '@/core/update'
 import { enabled } from '@/core/features'
 import { parseRepo } from '@/core/sync'
+import { istDate } from '@/core/time'
 import { GitHub } from '@/lib/github'
 
 import { PageCommands } from './page-commands'
@@ -56,6 +57,32 @@ export interface ContextInput {
 }
 
 export class BridgeCommands extends PageCommands {
+	/** Import Claude's explicit work intervals exactly once.  This bridge is
+	 * local-only: imported rows still go through Review before a manual Zoho
+	 * push. */
+	private async importWorklogs(files: Record<string, string>, now: number): Promise<number> {
+		const rt = await this.store.runtime()
+		const seen = new Set(rt.bridge?.importedWorklogs ?? [])
+		let added = 0
+		for (const [path, body] of Object.entries(files)) {
+			if (!/^bridge\/worklogs\/\d{4}-\d{2}\/.+\.jsonl$/.test(path)) continue
+			for (const line of body.split('\n')) {
+				try {
+					const w = JSON.parse(line) as { schema?: string; id?: string; from?: number; to?: number; text?: string; jobId?: string }
+					if (w.schema !== 'workpulse.worklog/1' || !w.id || seen.has(w.id) || !Number.isFinite(w.from) || !Number.isFinite(w.to) || w.to! <= w.from! || w.to! > now || typeof w.text !== 'string' || !w.text.trim()) continue
+					const minutes = Math.round((w.to! - w.from!) / 60_000)
+					if (minutes < 1 || minutes > 12 * 60) continue
+					await this.store.addEntry({ date: istDate(w.from!), slotStart: w.from!, slotEnd: w.to!, text: w.text.trim().slice(0, 500), jobId: w.jobId || undefined, minutes, kind: 'work', auto: true, bridgeWorklogId: w.id })
+					seen.add(w.id)
+					added++
+				} catch {
+					// One incomplete line must not block the rest of the worklog file.
+				}
+			}
+		}
+		if (added) await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, importedWorklogs: [...seen].slice(-2000) }))
+		return added
+	}
 	private async bridgeGithub(): Promise<GitHub | null> {
 		const [s, token] = await Promise.all([this.store.settings(), this.store.syncToken()])
 		const where = parseRepo(s.syncRepo)
@@ -120,8 +147,9 @@ export class BridgeCommands extends PageCommands {
 			}
 			for (const path of Object.keys(files)) if (!(path in shas)) delete files[path]
 			await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, etag: tree.etag, shas, files, polledAt: now, error: undefined }))
-			if (fetch.length) this.env.ui.changed()
-			return { changed: fetch.length, at: now }
+			const imported = await this.importWorklogs(files, now)
+			if (fetch.length || imported) this.env.ui.changed()
+			return { changed: fetch.length + imported, at: now }
 		} catch (e) {
 			const error = (e as Error).message
 			await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, polledAt: now, error }))

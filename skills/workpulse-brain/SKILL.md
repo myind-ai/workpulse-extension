@@ -20,7 +20,7 @@ WP="${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs"                        # installed a
 node "$WP" help
 ```
 
-How to connect everything: `docs/guides/connect-extension-and-claude-code.md` in this repo.
+How the whole flow works: `docs/guides/brain-flow-and-next-steps.md` in the WorkPulse repo.
 
 ## Setup — check first, then ask, never assume
 
@@ -115,6 +115,23 @@ If an inbox item is handled, acknowledge it: `node $WP inbox --ack <id>`.
 For personal productivity work, use `--scope personal --project <name>` and read the matching brief before planning. Preserve a concrete **next** step whenever work remains open; it is the resume point for the next session.
 
 ## While working
+
+### WorkPulse time log
+
+When the user asks to log a completed, real work interval, write one compact
+local WorkPulse row. Use an explicit duration or start/end time; never guess a
+session's elapsed time. This syncs through the private bridge into the browser
+extension's **Review & timesheet** queue. It does **not** write to Zoho: the
+user reviews and presses the extension's manual Push button.
+
+```bash
+node $WP worklog "Implemented retry validation" --minutes 45 --job ZOHO_JOB_ID --ticket PAY-2433
+node $WP worklog "Reviewed payment PR" --from 2026-10-28T10:00:00+05:30 --to 2026-10-28T10:30:00+05:30 --job ZOHO_JOB_ID
+```
+
+Keep the description factual and one line. Omit `--job` only when the user
+will select the job in Review. Never run a Zoho push; the extension owns that
+manual, visible step.
 
 Record the moment it happens, not at the end, when one of these occurs:
 

@@ -11,6 +11,7 @@ import { heartColour, pitch } from '@/core/brand'
 import { KIND_LABEL, tagsOf, type LearnKind } from '@/core/learn'
 import { matchesRow, suggest } from '@/core/links'
 import { fmtMinutes, istTime, prettyDate } from '@/core/time'
+import { promptCadenceLabel } from '@/core/reminders'
 import { call } from '@/lib/rpc'
 import { useAction, useLive, useNow } from '@/ui/hooks'
 import { AUTHOR, AUTHOR_URL, SOURCE_URL, SPONSOR_URL } from '@/entrypoints/dashboard/views/Support'
@@ -204,15 +205,26 @@ export function SettingsPanel({ s, onOpen }: { s: TodayState; onOpen: () => void
 		<div className="wp-card wp-stack-sm">
 			<Head title="Settings" onOpen={onOpen} />
 			<div className="wp-between wp-small">
-				<span>Prompt every</span>
+				<span>Ask about time</span>
 				<span className="wp-row">
+					{([['hourly', 'Hourly'], ['interval', 'Interval'], ['smart', 'Smart']] as const).map(([cadence, label]) => (
+						<button key={cadence} className={s.settings.promptCadence === cadence ? 'wp-btn wp-btn-sm wp-btn-soft' : 'wp-btn wp-btn-sm'} disabled={busy} onClick={() => save({ promptCadence: cadence })}>
+							{label}
+						</button>
+					))}
+				</span>
+			</div>
+			{s.settings.promptCadence === 'interval' && (
+				<div className="wp-row-wrap wp-small">
+					<span className="wp-muted">Every</span>
 					{[30, 45, 60, 90].map((m) => (
 						<button key={m} className={s.settings.promptInterval === m ? 'wp-btn wp-btn-sm wp-btn-soft' : 'wp-btn wp-btn-sm'} disabled={busy} onClick={() => save({ promptInterval: m })}>
 							{m}m
 						</button>
 					))}
-				</span>
-			</div>
+				</div>
+			)}
+			<div className="wp-muted wp-small">{promptCadenceLabel(s.settings)}. Smart respects focus sessions, meetings and away time.</div>
 			<label className="wp-between wp-small" style={{ cursor: 'pointer' }}>
 				<span>Chime with reminders</span>
 				<input type="checkbox" checked={s.settings.sound} disabled={busy} onChange={(e) => save({ sound: e.target.checked })} />

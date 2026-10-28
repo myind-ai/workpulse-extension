@@ -182,9 +182,26 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 						<input className="wp-input wp-num" type="number" value={form.graceMinutes} onChange={(e) => set('graceMinutes', Number(e.target.value))} />
 					</div>
 					<div>
-						<label className="wp-label">Prompt every (minutes)</label>
-						<input className="wp-input wp-num" type="number" value={form.promptInterval} onChange={(e) => set('promptInterval', Number(e.target.value))} />
+						<label className="wp-label">Ask about time</label>
+						<select className="wp-select" value={form.promptCadence} onChange={(e) => set('promptCadence', e.target.value as Settings['promptCadence'])}>
+							<option value="hourly">Every hour</option>
+							<option value="interval">At a fixed interval</option>
+							<option value="smart">Smart timing</option>
+						</select>
+						<div className="wp-muted wp-small" style={{ marginTop: 4 }}>
+							{form.promptCadence === 'hourly'
+								? 'Ask once each hour while time is unlogged.'
+								: form.promptCadence === 'interval'
+									? 'Ask on the interval you choose below.'
+									: 'Ask only for a meaningful unlogged stretch, never during a meeting or focus block.'}
+						</div>
 					</div>
+					{form.promptCadence === 'interval' && (
+						<div>
+							<label className="wp-label">Interval (minutes)</label>
+							<input className="wp-input wp-num" type="number" min={1} max={240} value={form.promptInterval} onChange={(e) => set('promptInterval', Number(e.target.value))} />
+						</div>
+					)}
 					<div>
 						<label className="wp-label">Hours a day</label>
 						<input className="wp-input wp-num" type="number" step="0.5" value={form.minHours} onChange={(e) => set('minHours', Number(e.target.value))} />

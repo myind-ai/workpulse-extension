@@ -3,6 +3,7 @@
 // and carries the actions out.
 
 import { lastCallDue } from './closeout'
+import { promptEvery } from './reminders'
 import { isWorkDay } from './rules'
 import { atIst, HOUR, MIN } from './time'
 import type { Day, DayFlags, Pending, Settings } from './types'
@@ -187,7 +188,7 @@ export function decide(s: Snapshot): Action[] {
 	if (!checkedOut && s.slotStart != null && !focusing) {
 		// A meeting is not an interruption to log — it is one not to interrupt.
 		const win = askWindow(s.slotStart, s.now, s.meetings)
-		const due = win != null && !inMeeting(s.now, s.meetings) && slotDue(win.to, win.from, end, s.settings.promptInterval)
+		const due = win != null && !inMeeting(s.now, s.meetings) && slotDue(win.to, win.from, end, promptEvery(s.settings))
 		// Once the day's hours are written down, the hourly question has been
 		// answered — for the day. Working on is your business, and the time can be
 		// added whenever you like from "Log now" or the Review page; what should

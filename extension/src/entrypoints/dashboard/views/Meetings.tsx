@@ -12,7 +12,11 @@ import { TimeField } from '@/ui/TimeField'
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const WEEKDAYS = [1, 2, 3, 4, 5]
 
-const blank = { name: '', kind: 'scrum' as MeetingKind, time: '09:45', days: WEEKDAYS, leadMinutes: 5, logMinutes: 0, jobId: '', autoLog: true }
+type MeetingForm = { id?: string; name: string; kind: MeetingKind; time: string; days: number[]; leadMinutes: number; logMinutes: number; jobId: string; autoLog: boolean }
+
+// Meetings are work by default. A new shared stand-up therefore appears in
+// today's review after it ends; turn it off only for a reminder-only meeting.
+const blank: MeetingForm = { name: '', kind: 'scrum', time: '09:45', days: WEEKDAYS, leadMinutes: 5, logMinutes: 30, jobId: '', autoLog: true }
 
 /** What the card arrives with. A scrum gets the three points; the rest get the facts. */
 const KINDS: { id: MeetingKind; label: string }[] = [
@@ -28,6 +32,13 @@ function saysDays(days: number[]): string {
 	if (sorted.join() === WEEKDAYS.join()) return 'Mon–Fri'
 	if (sorted.length === 7) return 'every day'
 	return sorted.map((d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d - 1]).join(', ')
+}
+
+/** A meeting's end, expressed in the same IST wall-clock form as its start. */
+function endsAt(time: string, minutes: number): string {
+	const [hours, mins] = time.split(':').map(Number)
+	const end = (hours * 60 + mins + minutes) % (24 * 60)
+	return `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`
 }
 
 /** "next at 09:40 today", "next Mon 19 Oct, 09:40", "muted". */
@@ -77,7 +88,7 @@ export function Meetings() {
 	const { data: jobs } = useLive(() => call('jobs'))
 	const now = Date.now()
 	const today = istDate(now)
-	const [form, setForm] = useState(blank)
+	const [form, setForm] = useState<MeetingForm>(blank)
 	const { busy, error, run } = useAction()
 
 	const save = () =>
@@ -88,6 +99,7 @@ export function Meetings() {
 		})
 
 	const toggle = (m: Meeting) => run(async () => void (await call('saveMeeting', { ...m, enabled: !m.enabled }), await reload()))
+	const edit = (m: Meeting) => setForm({ id: m.id, name: m.name, kind: m.kind ?? 'other', time: m.time, days: m.days, leadMinutes: m.leadMinutes, logMinutes: m.logMinutes ?? 0, jobId: m.jobId ?? '', autoLog: m.autoLog !== false })
 
 	return (
 		<section className="wp-card wp-stack">
@@ -128,6 +140,9 @@ export function Meetings() {
 								)}
 							</span>
 							<span className="wp-row">
+								<button className="wp-btn wp-btn-sm" disabled={busy} onClick={() => edit(m)}>
+									Edit
+								</button>
 								<MoveToday meeting={m} busy={busy} onDone={reload} />
 								<button className="wp-btn wp-btn-sm" disabled={busy} onClick={() => toggle(m)}>
 									{m.enabled ? 'Mute' : 'Unmute'}
@@ -192,7 +207,7 @@ export function Meetings() {
 					onChange={(e) => setForm({ ...form, logMinutes: Number(e.target.value) })}
 					aria-label="Put it on the timesheet"
 				>
-					<option value={0}>don't log it</option>
+					<option value={0}>reminder only</option>
 					{[15, 30, 45, 60, 90].map((n) => (
 						<option key={n} value={n}>
 							log {n} min
@@ -204,7 +219,7 @@ export function Meetings() {
 				{!!form.logMinutes && (
 					<label className="wp-row wp-small" title="Write it onto the timesheet each day without asking. You can delete the row if it did not happen.">
 						<input type="checkbox" checked={form.autoLog !== false} onChange={(e) => setForm({ ...form, autoLog: e.target.checked })} />
-						<span>add it without asking</span>
+					<span>add to daily time log automatically</span>
 					</label>
 				)}
 				{!!form.logMinutes && !!jobs?.length && (
@@ -218,11 +233,12 @@ export function Meetings() {
 					</select>
 				)}
 				<button className="wp-btn wp-btn-primary" disabled={busy || !form.name.trim()} onClick={save}>
-					Add
+					{form.id ? 'Save meeting' : 'Add meeting'}
 				</button>
+				{form.id && <button className="wp-btn wp-btn-ghost" disabled={busy} onClick={() => setForm(blank)}>Cancel edit</button>}
 			</div>
 			{!!form.logMinutes && (
-				<span className="wp-muted wp-small">After it finishes, WorkPulse asks whether it happened. Yes puts {form.logMinutes} minutes on today's timesheet at {form.time}.</span>
+				<span className="wp-muted wp-small">After it ends, it appears in today’s time logs as {form.time}–{endsAt(form.time, form.logMinutes)} · {form.logMinutes} min. You can review or remove it before sending.</span>
 			)}
 			{error && <div className="wp-error">{error}</div>}
 		</section>

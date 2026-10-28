@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { calibrationLine } from '@/core/calibrate'
 import type { Licence } from '@/core/licence'
 import { SPAN_LABEL, type Span } from '@/core/period'
-import { fmtMinutes } from '@/core/time'
+import { fmtMinutes, prettyDate } from '@/core/time'
 import { API_ENABLED } from '@/core/features'
 import { reviewText } from '@/core/week'
 import { call } from '@/lib/rpc'
@@ -327,6 +327,31 @@ function Hours() {
 						</span>
 					</div>
 					{data.line && <div className="wp-muted wp-small">{data.line}</div>}
+					{span === 'week' && (
+						<div className="wp-stack-sm">
+							<span className="wp-eyebrow">This week's time logs</span>
+							<table className="wp-table wp-small">
+								<thead>
+									<tr>
+										<th>Day</th>
+										<th>Logged</th>
+										<th>On the clock</th>
+									</tr>
+									</thead>
+									<tbody>
+										{data.days.map((day) => (
+											<tr key={day.date}>
+												<td>
+													<button className="wp-action" onClick={() => (location.hash = `#/review/${day.date}`)}>{prettyDate(day.date)}</button>
+												</td>
+												<td className="wp-num">{day.loggedMinutes ? fmtMinutes(day.loggedMinutes) : '—'}</td>
+												<td className="wp-muted wp-num">{day.clockMinutes ? fmtMinutes(day.clockMinutes) : day.off ? 'Off' : '—'}</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+						</div>
+					)}
 					{!!o.offDaysWorked.length && (
 						<div className="wp-warn-text wp-small">
 							Worked on {o.offDaysWorked.map((d) => d.date).join(', ')} — {o.offDaysWorked.length === 1 ? 'a day' : 'days'} Zoho has as not working.

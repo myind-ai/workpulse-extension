@@ -418,21 +418,21 @@
 /* ── the box, on any page ────────────────────────────────────────────────── */
 .wp-pal-back {
 	position: fixed; inset: 0; z-index: 2147483646; display: flex; align-items: flex-start; justify-content: center;
-	padding: 12vh 16px 16px; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+	padding: 12vh 16px 16px; background: rgba(15, 23, 42, 0.4);
 	animation: wp-fade 0.12s ease-out;
 }
 .wp-pal {
 	width: 100%; max-width: 620px; background: var(--wp-surface); border: 1px solid var(--wp-border);
 	border-radius: 14px; box-shadow: var(--wp-shadow); overflow: hidden; animation: wp-rise 0.16s ease-out;
 }
-.wp-pal-modes { display: flex; align-items: center; gap: 2px; padding: 8px 10px 0; }
+.wp-pal-modes { display: flex; align-items: center; gap: 2px; padding: 8px 10px 0; overflow-x: auto; scrollbar-width: thin; }
 .wp-pal-mode {
 	padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; background: none;
-	color: var(--wp-muted); font: inherit; font-size: 12px; font-weight: 550; cursor: pointer;
+	color: var(--wp-muted); font: inherit; font-size: 12px; font-weight: 550; cursor: pointer; white-space: nowrap; flex: 0 0 auto;
 }
 .wp-pal-mode:hover { background: var(--wp-surface-2); border-color: var(--wp-border); color: var(--wp-text); }
 .wp-pal-on { background: var(--wp-accent-soft); border-color: transparent; color: var(--wp-accent); }
-.wp-pal-tab { margin-left: auto; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wp-faint); }
+.wp-pal-tab { margin-left: auto; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wp-faint); white-space: nowrap; flex: 0 0 auto; }
 .wp-pal-input {
 	width: 100%; padding: 14px 16px 16px; border: 0; background: none; color: var(--wp-text);
 	font: inherit; font-size: 17px; line-height: 1.3;
@@ -494,6 +494,11 @@
 	font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 4px; margin: 0 1px;
 	border: 1px solid var(--wp-border); border-bottom-width: 2px; border-radius: 4px; color: var(--wp-muted);
 }
+
+/* The focus clip has a stable slot between the focus heading and its task.
+   This keeps Tick centred as the task text, timer and action buttons change. */
+.wp-focus-art { display: flex; align-items: center; justify-content: center; min-height: 64px; }
+.wp-focus-art .wp-art { margin: 0; }
 
 /* ── the day, as a bar ───────────────────────────────────────────────────── */
 .wp-bar { position: relative; height: 8px; border-radius: 4px; background: var(--wp-border); overflow: hidden; }

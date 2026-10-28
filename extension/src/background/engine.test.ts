@@ -2485,6 +2485,20 @@ describe('a meeting reaching you', () => {
 		expect(back?.movedOn).toBeUndefined()
 	})
 
+	it('should automatically put a scheduled meeting into today’s time logs with its actual range', async () => {
+		at('2026-10-12T09:00:00')
+		await cmd.confirmAttendance('in')
+		const m = await cmd.saveMeeting({ ...standup, time: '09:45', logMinutes: 30, jobId: 'j1', autoLog: true })
+
+		at('2026-10-12T10:16:00')
+		await engine.tick()
+
+		const entry = (await store.entries('2026-10-12')).find((e) => e.meetingId === m.id)
+		expect(entry).toMatchObject({ text: 'Standup', jobId: 'j1', minutes: 30, auto: true })
+		expect(entry?.slotEnd! - entry?.slotStart!).toBe(30 * 60_000)
+		expect((await cmd.meetings()).find((x) => x.id === m.id)?.loggedOn).toBe('2026-10-12')
+	})
+
 	it('should stop ringing the moment it is answered', async () => {
 		at('2026-10-12T09:00:00')
 		await cmd.confirmAttendance('in')

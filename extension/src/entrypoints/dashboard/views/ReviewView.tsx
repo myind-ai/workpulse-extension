@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 
 import type { PushResult } from '@/background/review-commands'
 import { entryBlocks, minutesFromHHMM, rowsPerTask, splitRows } from '@/core/rules'
-import { addDays, fmtMinutes, hhmm, istDate, istTime, prettyDate } from '@/core/time'
+import { addDays, atIst, fmtMinutes, hhmm, isHHMM, istDate, istTime, prettyDate } from '@/core/time'
 import { fileName, SHEET_LABEL, timesheet, type SheetFormat } from '@/core/export'
 import { ticketKey } from '@/core/links'
 import { call } from '@/lib/rpc'
@@ -15,6 +15,7 @@ import { copyText, useAction, useLive } from '@/ui/hooks'
 import { Icon, type IconName } from '@/ui/Icon'
 import { PasteCall } from '@/ui/PasteCall'
 import { Busy } from '@/ui/Busy'
+import { TimeField } from '@/ui/TimeField'
 
 import { Support } from './Support'
 import { Art } from '@/ui/Art'
@@ -55,7 +56,7 @@ interface Row {
 	to?: number
 }
 
-/** Times stay only while the hours still match them; an edited row goes as hours. */
+/** Times stay only while the total still matches them. */
 const spanFits = (x: Row) => x.from != null && x.to != null && Math.round((x.to - x.from) / 60_000) === minutesFromHHMM(x.hours)
 
 const STATUS = {
@@ -70,6 +71,7 @@ export function ReviewView({ date }: { date?: string }) {
 	const { data: s } = useLive(() => call('state'))
 	const [rows, setRows] = useState<Row[]>([])
 	const [result, setResult] = useState<PushResult | null>(null)
+	const [timeError, setTimeError] = useState<string | null>(null)
 	const [copied, setCopied] = useState<number | 'all' | null>(null)
 	const [manual, setManual] = useState({ from: '', to: '', text: '', jobId: '' })
 	const { busy, error, run } = useAction()
@@ -108,6 +110,25 @@ export function ReviewView({ date }: { date?: string }) {
 	const totalMinutes = rows.reduce((a, x) => a + (minutesFromHHMM(x.hours) ?? 0), 0)
 	const total = hhmm(totalMinutes)
 	const over = r.attendanceMinutes != null && totalMinutes > r.attendanceMinutes + 1
+	// A supplied clock range is a promise about when the work happened. Do not
+	// quietly turn a bad or overlapping promise into an hours-only log at send
+	// time: that makes the total look valid while hiding the conflict.
+	const invalidRanges = new Set<number>()
+	const timed = rows
+		.map((row, index) => ({ row, index }))
+		.filter(({ row }) => row.from != null && row.to != null)
+	for (const { row, index } of timed) if (row.to! <= row.from!) invalidRanges.add(index)
+	for (let a = 0; a < timed.length; a++) {
+		for (let b = a + 1; b < timed.length; b++) {
+			const left = timed[a]
+			const right = timed[b]
+			if (left.row.from! < right.row.to! && right.row.from! < left.row.to!) {
+				invalidRanges.add(left.index)
+				invalidRanges.add(right.index)
+			}
+		}
+	}
+	const hasRangeIssue = invalidRanges.size > 0
 	const status = STATUS[r.day.timelogStatus]
 	// "Done" means nothing is waiting, not that the day was once sent — an entry
 	// made after a push must still be sendable.
@@ -123,7 +144,28 @@ export function ReviewView({ date }: { date?: string }) {
 		const billable = s.settings.billingStatus === 'billable' ? 'Billable' : 'Non-Billable'
 		return [job?.project ?? '', job?.name ?? (x.jobId || 'No job'), x.description, billable, '', x.hours].join('\t')
 	}
-	const setRow = (i: number, patch: Partial<Row>) => setRows((list) => list.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+	const setRow = (i: number, patch: Partial<Row>) => {
+		setTimeError(null)
+		setRows((list) => list.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+	}
+	/**
+	 * The clock fields are the source of truth once both are present: moving
+	 * either one immediately changes this row and the page total.  We leave an
+	 * incomplete/invalid range as an hours-only row, rather than accidentally
+	 * sending a bogus time range to Zoho.
+	 */
+	const setRowTime = (i: number, edge: 'from' | 'to', time: string) => {
+		setTimeError(null)
+		setRows((list) =>
+			list.map((x, j) => {
+				if (j !== i) return x
+				const from = edge === 'from' ? (isHHMM(time) ? atIst(r.date, time) : undefined) : x.from
+				const to = edge === 'to' ? (isHHMM(time) ? atIst(r.date, time) : undefined) : x.to
+				if (from != null && to != null && to > from) return { ...x, from, to, hours: hhmm(Math.round((to - from) / 60_000)) }
+				return { ...x, from, to }
+			}),
+		)
+	}
 
 	const copy = async (which: number | 'all') => {
 		await copyText(which === 'all' ? rows.map(line).join('\n') : line(rows[which]))
@@ -133,6 +175,10 @@ export function ReviewView({ date }: { date?: string }) {
 
 	const push = () =>
 		run(async () => {
+			if (hasRangeIssue) {
+				setTimeError('Fix the overlapping or backwards time ranges in Your time logs before sending.')
+				return
+			}
 			const res = await call(
 				'pushDay',
 				r.date,
@@ -298,6 +344,7 @@ export function ReviewView({ date }: { date?: string }) {
 					<Step icon="clock" title="Check out" done={r.day.checkedOutAt != null} />
 					{r.day.checkedOutAt != null && <span className="wp-chip wp-chip-ok">Checked out {istTime(r.day.checkedOutAt)}</span>}
 				</div>
+				{hasRangeIssue && <div className="wp-error wp-small">Time ranges overlap or end before they start. Fix the highlighted rows before sending.</div>}
 				{r.day.checkedOutAt == null && isToday && (
 					<div className="wp-row-wrap">
 						{s.awaiting === 'out' ? (
@@ -331,7 +378,9 @@ export function ReviewView({ date }: { date?: string }) {
 						<thead>
 							<tr>
 								<th style={{ width: '28%' }}>Job</th>
-								<th style={{ width: 90 }}>Hours</th>
+								<th style={{ width: 105 }}>Start</th>
+								<th style={{ width: 105 }}>End</th>
+								<th style={{ width: 90 }}>Total</th>
 								<th>Description</th>
 								<th style={{ width: 120 }} />
 							</tr>
@@ -350,18 +399,28 @@ export function ReviewView({ date }: { date?: string }) {
 										</select>
 									</td>
 									<td>
+										<TimeField value={x.from == null ? '' : istTime(x.from)} label={`Start time for ${jobName.get(x.jobId) ?? 'time log'} row ${i + 1}`} disabled={done} width={96} step={1} onChange={(time) => setRowTime(i, 'from', time)} />
+									</td>
+									<td>
+										<TimeField value={x.to == null ? '' : istTime(x.to)} label={`End time for ${jobName.get(x.jobId) ?? 'time log'} row ${i + 1}`} disabled={done} width={96} step={1} onChange={(time) => setRowTime(i, 'to', time)} />
+									</td>
+									<td>
 										<input
 											className="wp-input wp-num"
 											value={x.hours}
 											placeholder="01:30"
 											disabled={done}
 											aria-invalid={minutesFromHHMM(x.hours) == null}
-											onChange={(e) => setRow(i, { hours: e.target.value })}
+											onChange={(e) => setRow(i, { hours: e.target.value, from: undefined, to: undefined })}
 										/>
-										{spanFits(x) && (
-											<div className="wp-muted wp-small wp-num" style={{ whiteSpace: 'nowrap' }} title={s.settings.timelogTimes ? 'Sent to Zoho with this start and end' : 'Sent as hours (Settings → send the real start and end time is off)'}>
-												{istTime(x.from!)}–{istTime(x.to!)}
+										{invalidRanges.has(i) ? (
+											<div className="wp-warn-text wp-small">{x.from != null && x.to != null && x.to <= x.from ? 'End must be after start' : 'Overlaps another row'}</div>
+										) : spanFits(x) ? (
+											<div className="wp-muted wp-small" title={s.settings.timelogTimes ? 'Sent to Zoho with this start and end' : 'Sent as hours (Settings → send the real start and end time is off)'}>
+												{fmtMinutes(minutesFromHHMM(x.hours) ?? 0)} from times
 											</div>
+										) : (
+											<div className="wp-muted wp-small">Enter both times to calculate</div>
 										)}
 									</td>
 									<td>
@@ -406,7 +465,7 @@ export function ReviewView({ date }: { date?: string }) {
 					<div className="wp-row-wrap">
 						{busy && r.canPush && <Art name="push" size={56} delay={400} />}
 						{r.canPush ? (
-							<button className="wp-btn wp-btn-primary" disabled={busy || !rows.length} onClick={push}>
+							<button className="wp-btn wp-btn-primary" disabled={busy || !rows.length || hasRangeIssue} onClick={push}>
 								<Busy busy={busy} doing={`Pushing ${rows.length} to Zoho…`}>
 									Push {rows.length} time log{rows.length === 1 ? '' : 's'} to Zoho
 								</Busy>
@@ -449,6 +508,7 @@ export function ReviewView({ date }: { date?: string }) {
 						)}
 					</div>
 				)}
+				{timeError && <div className="wp-error">{timeError}</div>}
 				{result && result.status !== 'pushed' && <div className={result.status === 'skipped' ? 'wp-muted' : 'wp-error'}>{result.message}</div>}
 			</section>
 

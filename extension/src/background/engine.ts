@@ -6,6 +6,7 @@ import { brainOf } from '@/core/bridge'
 import { brainLearnings } from '@/core/bridge-learn'
 import { API_ENABLED, enabled } from '@/core/features'
 import { repeats } from '@/core/learn'
+import { promptEvery } from '@/core/reminders'
 import { backupDue } from '@/core/sync'
 import { classify, classifyLocal, hoursFromHHMM, isWorkDay, parseZohoDateTime, scanRange } from '@/core/rules'
 import { ACTIVE_SECS, countInterrupt, decide, IDLE_SKIP_SECS, mayInterrupt, promptOwed, type Action, type Snapshot } from '@/core/schedule'
@@ -298,7 +299,8 @@ export class Engine {
 				await this.setPending({ kind: 'prompt', blocking: true, since: this.env.now() })
 				// Worded from your own interval: a half-hourly reminder that says
 				// "the last hour" is the extension disagreeing with itself.
-				await this.note('prompt', 'What did you work on?', `Log the last ${s.promptInterval === 60 ? 'hour' : `${s.promptInterval} minutes`} to keep your timesheet complete.`, false)
+				const minutes = promptEvery(s)
+				await this.note('prompt', 'What did you work on?', `Log the last ${minutes === 60 ? 'hour' : `${minutes} minutes`} to keep your timesheet complete.`, false)
 				return
 			}
 			case 'wrapup': {
@@ -1007,7 +1009,7 @@ export class Engine {
 			slotEnd: await this.store.lastSlotEnd(today),
 			now: this.env.now(),
 			shiftEnd: atIst(today, settings.shiftEnd),
-			intervalMinutes: settings.promptInterval,
+			intervalMinutes: promptEvery(settings),
 			manual: p.manual,
 			loggedMinutes: entries.filter((e) => e.kind === 'work').reduce((n, e) => n + e.minutes, 0),
 			minHours: settings.minHours,

@@ -5,6 +5,7 @@ import { scopesFor, type Settings } from '@/core/types'
 
 const MODES = ['reminder', 'timelogs', 'full']
 const DCS = ['in', 'com', 'eu', 'com.au']
+const CADENCES = ['hourly', 'interval', 'smart']
 
 export function validateSettings(s: Settings): Settings {
 	const fail = (m: string): never => {
@@ -21,6 +22,7 @@ export function validateSettings(s: Settings): Settings {
 	if (!workDays.length) fail('Pick at least one work day.')
 	if (!MODES.includes(s.zohoMode)) fail('Unknown Zoho mode.')
 	if (!DCS.includes(s.dataCenter)) fail('Unknown Zoho data centre.')
+	if (!CADENCES.includes(s.promptCadence)) fail('Unknown reminder cadence.')
 	if (!/^https:\/\//.test(s.attendanceUrl)) fail('The Zoho attendance page must be an https:// address.')
 	const email = s.email.trim()
 	if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('That email does not look right.')

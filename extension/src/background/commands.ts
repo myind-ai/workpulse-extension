@@ -2,6 +2,7 @@
 // `call()` in lib/rpc.ts; the router in entrypoints/background.ts dispatches.
 
 import { API_ENABLED } from '@/core/features'
+import { promptEvery } from '@/core/reminders'
 import { awayMinutes, awayNote, groupEntries, isWorkDay } from '@/core/rules'
 import { addDays, atIst, fmtMinutes, isHHMM, istDate, istTime, istWeekday, MIN } from '@/core/time'
 import type { Day, Entry, Issue, Job, PendingKind, Settings, Task } from '@/core/types'
@@ -189,7 +190,7 @@ export class DayCommands {
 			this.store.pendingDays(addDays(today, -7), today),
 		])
 		const snap = await this.engine.snapshot()
-		const nextPromptAt = day.checkedInAt != null && day.checkedOutAt == null && snap.slotStart != null ? snap.slotStart + settings.promptInterval * MIN : null
+		const nextPromptAt = day.checkedInAt != null && day.checkedOutAt == null && snap.slotStart != null ? snap.slotStart + promptEvery(settings) * MIN : null
 		return {
 			today,
 			now,
@@ -258,7 +259,7 @@ export class DayCommands {
 			runningTimer(this.store, now),
 			this.store.meetings(),
 		])
-		let start = day.checkedInAt != null ? Math.max(day.checkedInAt, lastEnd ?? 0) : Math.max(lastEnd ?? 0, now - s.promptInterval * MIN)
+		let start = day.checkedInAt != null ? Math.max(day.checkedInAt, lastEnd ?? 0) : Math.max(lastEnd ?? 0, now - promptEvery(s) * MIN)
 		const shiftEnd = atIst(today, s.shiftEnd)
 		let end = !manual && now > shiftEnd && start < shiftEnd ? shiftEnd : now
 		// The same cut the scheduler made when it decided to ask: a window that
@@ -1252,7 +1253,7 @@ export class DayCommands {
 	async tasks() {
 		const now = this.now()
 		const [tasks, timer, s] = await Promise.all([this.store.tasks(), runningTimer(this.store, now), this.store.settings()])
-		return { tasks, timer, ask: tasksToAsk(tasks, now, s.promptInterval) }
+		return { tasks, timer, ask: tasksToAsk(tasks, now, promptEvery(s)) }
 	}
 
 	/** Tasks and saved links for one day: made then, finished then, or due then. */
@@ -1321,7 +1322,7 @@ export class DayCommands {
 	}
 
 	/** Adds or edits one. The id decides which. */
-	async saveMeeting(m: { id?: string; name: string; kind?: MeetingKind; time: string; days: number[]; leadMinutes: number; enabled?: boolean; logMinutes?: number; jobId?: string; logText?: string }) {
+	async saveMeeting(m: { id?: string; name: string; kind?: MeetingKind; time: string; days: number[]; leadMinutes: number; enabled?: boolean; logMinutes?: number; jobId?: string; logText?: string; autoLog?: boolean }) {
 		const name = m.name.trim()
 		if (!name) throw new Error('Give the meeting a name.')
 		if (!isHHMM(m.time)) throw new Error('Use a time like 09:45.')
@@ -1340,6 +1341,7 @@ export class DayCommands {
 			logMinutes: Math.max(0, Math.min(480, Math.round(m.logMinutes ?? existing?.logMinutes ?? 0))),
 			jobId: m.jobId ?? existing?.jobId,
 			logText: (m.logText ?? existing?.logText)?.trim() || undefined,
+			autoLog: m.autoLog ?? existing?.autoLog ?? true,
 			loggedOn: existing?.loggedOn,
 			movedOn: existing?.movedOn,
 			skippedOn: existing?.skippedOn,

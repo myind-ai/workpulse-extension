@@ -128,7 +128,9 @@ function Deep({ now, suggest, taskUid }: { now: number; suggest?: string; taskUi
 						{left}m
 					</span>
 				</div>
-				<Art name="focus" size={64} />
+				<div className="wp-focus-art">
+					<Art name="focus" size={64} />
+				</div>
 				{(f.session.intent || f.task) && <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.session.intent ?? f.task}</div>}
 				<div className="wp-bar">
 					<span className="wp-bar-fill wp-bar-gap" style={{ width: `${Math.round(f.progress * 100)}%` }} />
