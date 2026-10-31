@@ -399,6 +399,12 @@ export function Popup() {
 							<Icon name="clock" size={13} /> Check out
 						</button>
 					)}
+					{/* The check-out alarm can be silenced from here too, without the card. */}
+					{s.checkoutRinging && s.day.checkedOutAt == null && (
+						<button className="wp-btn wp-btn-sm wp-btn-ghost wp-btn-block" disabled={busy} onClick={() => act('workingLate')}>
+							Working late — stop the alarm for today
+						</button>
+					)}
 				</div>
 
 				{/* One thing to answer, never a list that wraps a word per line. */}

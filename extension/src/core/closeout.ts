@@ -87,6 +87,34 @@ export function lastCallDue(s: { now: number; shiftEnd: number; checkedIn: boole
 	return s.now >= s.shiftEnd + LAST_CALL_AFTER
 }
 
+/**
+ * When the working day is over: your hours since check-in, or the end of the
+ * shift, whichever comes first. A late start still ends at the shift's end, and
+ * an early one ends when the hours are in rather than at a clock time.
+ */
+export function workEndsAt(checkedInAt: number, minHours: number, shiftEnd: number): number {
+	return Math.min(checkedInAt + minHours * 60 * MIN, shiftEnd)
+}
+
+/**
+ * The check-out alarm: rings from the end of the working day until the day is
+ * checked out, or you say you are working late. Not during a meeting — a call
+ * is the one place an alarm is worse than a missed punch.
+ */
+export function checkoutAlarmDue(s: {
+	now: number
+	checkedInAt?: number
+	checkedOutAt?: number
+	minHours: number
+	shiftEnd: number
+	isOff: boolean
+	workingLate: boolean
+	inMeeting: boolean
+}): boolean {
+	if (s.isOff || s.checkedInAt == null || s.checkedOutAt != null || s.workingLate || s.inMeeting) return false
+	return s.now >= workEndsAt(s.checkedInAt, s.minHours, s.shiftEnd)
+}
+
 /** The sentence a regularisation form wants, with the time filled in. */
 export function regularisationNote(date: string, at: string, why: string): string {
 	return `Missed the check-out on ${date}. Worked until about ${at} — ${why}. Requesting a regularisation for that time.`

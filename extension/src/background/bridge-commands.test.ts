@@ -221,3 +221,19 @@ describe('managing what was saved', () => {
 		expect((await cmd.bridge()).entries[0].title).toBe('After')
 	})
 })
+
+describe('Claude Code work-log restore', () => {
+	it('imports once normally, and imports again after its local row was restored away', async () => {
+		const from = clock - 30 * 60_000
+		const file = { 'bridge/worklogs/2026-10/cli-a.jsonl': JSON.stringify({ schema: 'workpulse.worklog/1', id: 'claude-1', from, to: clock - 60_000, text: 'Claude Code work · payments', jobId: 'job-1' }) }
+		expect(await (cmd as any).importWorklogs(file, clock)).toBe(1)
+		const date = new Date(from).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+		const first = await store.entries(date)
+		expect(first).toHaveLength(1)
+		expect(first[0]).toMatchObject({ bridgeWorklogId: 'claude-1', auto: true, jobId: 'job-1' })
+		expect(await (cmd as any).importWorklogs(file, clock)).toBe(0)
+		await store.setEntries(date, [])
+		expect(await (cmd as any).importWorklogs(file, clock)).toBe(1)
+		expect(await store.entries(date)).toHaveLength(1)
+	})
+})

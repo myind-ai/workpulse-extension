@@ -9,7 +9,7 @@ import { repeats } from '@/core/learn'
 import { promptEvery } from '@/core/reminders'
 import { backupDue } from '@/core/sync'
 import { classify, classifyLocal, hoursFromHHMM, isWorkDay, parseZohoDateTime, scanRange } from '@/core/rules'
-import { ACTIVE_SECS, countInterrupt, decide, IDLE_SKIP_SECS, mayInterrupt, promptOwed, type Action, type Snapshot } from '@/core/schedule'
+import { ACTIVE_SECS, countInterrupt, decide, IDLE_SKIP_SECS, inMeeting, mayInterrupt, promptOwed, type Action, type Snapshot } from '@/core/schedule'
 import { addDays, atIst, DAY, istDate, istTime, istWeekday, MIN, prettyDate } from '@/core/time'
 import { emptyFlags, type Day, type IssueKind, type Pending, type Runtime } from '@/core/types'
 import { timeOn } from '@/core/zoho-page'
@@ -22,7 +22,7 @@ import { reviewDue } from '@/core/week'
 import { dayKind, hoursFor, isOffKind } from '@/core/leave'
 import { badgeFor, LOCK_AFTER_DAYS } from '@/core/habit'
 import { badMoment, deferUntil } from '@/core/predict'
-import { leftAt, needsClosing } from '@/core/closeout'
+import { checkoutAlarmDue, leftAt, needsClosing } from '@/core/closeout'
 import { dueMeetings, dueToLog, logsItself, meetingSlot, meetingSlots, meetingWhen, timeOn as meetingTimeOn, type Meeting } from '@/core/meetings'
 import { dueReminders, nextRepeat } from '@/lib/tasks'
 import type { ZohoApi } from '@/lib/zoho'
@@ -213,6 +213,7 @@ export class Engine {
 				await this.store.updateRuntime((r) => void (r.lastError = errText(e)))
 			}
 		}
+		await this.checkoutAlarm(now, true)
 		await this.refreshBadge()
 		return actions
 	}
@@ -398,6 +399,63 @@ export class Engine {
 				if (task) await this.note('taskdue', task.title, 'Still waiting on you.', true)
 			}
 		}
+	}
+
+	/**
+	 * The working day is over and you are still checked in: it rings, every tick,
+	 * until the day is checked out or you say you are working late. A single chime
+	 * at shift end is the one people walk away from, and tomorrow that is a
+	 * regularisation form and a guess at when you left.
+	 *
+	 * Called on every tick and after every punch, so a check-out — here, on the
+	 * phone, or on Zoho's own page — silences it within the minute.
+	 */
+	async checkoutAlarm(now: number, raiseCard = false): Promise<void> {
+		const today = istDate(now)
+		const [s, day, rt, meetings] = await Promise.all([this.store.settings(), this.store.day(today), this.store.runtime(), this.store.meetings()])
+		const flags = rt.flags.date === today ? rt.flags : emptyFlags(today)
+		const due =
+			s.sound &&
+			s.alarmCheckOut &&
+			isWorkDay(today, s.workDays) &&
+			checkoutAlarmDue({
+				now,
+				checkedInAt: day.checkedInAt,
+				checkedOutAt: day.checkedOutAt,
+				// A half day ends at half the hours, as everywhere else.
+				minHours: day.offKind === 'half' ? hoursFor('half', s.minHours) : s.minHours,
+				shiftEnd: atIst(today, s.shiftEnd),
+				isOff: !!day.isOff,
+				workingLate: !!flags.workingLate,
+				inMeeting: inMeeting(now, meetingSlots(meetings, today)),
+			})
+		if (!due) {
+			if (flags.checkoutRinging) {
+				this.env.ui.alarm?.(false)
+				await this.store.updateRuntime((r) => void (r.flags.checkoutRinging = false))
+				this.env.ui.changed()
+			}
+			return
+		}
+		if (!flags.checkoutRinging) {
+			await this.store.updateRuntime((r) => void (r.flags.checkoutRinging = true))
+			await this.note('checkout', 'Time to check out', 'Your working day is over. This keeps ringing until you check out, or press Working late.', true)
+			this.env.ui.changed()
+		}
+		// The card says what stops it, once a day. Raised after the tick's own
+		// reminders, so it never takes the place of the hour's card or hides the
+		// "hours done" note; never over a card already waiting, and once put down it
+		// stays down — the sound is what keeps going, not the card.
+		const up = (await this.store.runtime()).pending
+		// A wrap-up card already up is this card: put down, it stays down.
+		if (up?.kind === 'wrapup' && !flags.checkoutCardShown) await this.store.updateRuntime((r) => void (r.flags.checkoutCardShown = true))
+		else if (raiseCard && !flags.checkoutCardShown && !up && day.timelogStatus === 'pending') {
+			await this.store.updateRuntime((r) => void (r.flags.checkoutCardShown = true))
+			await this.setPending({ kind: 'wrapup', blocking: true, since: now })
+		}
+		// Starting it while it rings does nothing; after its own five minutes it
+		// has stopped, and this starts it again — so it does not stop on its own.
+		this.env.ui.alarm?.(true)
 	}
 
 	/**
@@ -978,9 +1036,13 @@ export class Engine {
 	async reconcile(): Promise<void> {
 		const rt = await this.store.runtime()
 		const p = rt.pending
-		if (!p) return
-		if (await this.owed(p)) await this.env.ui.show(p)
-		else await this.clearPending()
+		if (p) {
+			if (await this.owed(p)) await this.env.ui.show(p)
+			else await this.clearPending()
+		}
+		// Last: clearing a stale card stops whatever is ringing, and the check-out
+		// alarm is not answered by a meeting card going away.
+		await this.checkoutAlarm(this.env.now())
 	}
 
 	/**

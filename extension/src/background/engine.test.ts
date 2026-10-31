@@ -1635,8 +1635,98 @@ describe('alarms and the discipline they protect', () => {
 		await cmd.confirmAttendance('in')
 		at('2026-10-12T18:31:00') // shift end
 		await engine.tick()
-		expect(ui.notes).toContain('wrapup')
+		// The ringing card replaces the quiet "wrap up" toast rather than sitting beside it.
+		expect(ui.notes).toContain('checkout')
+		expect(ui.ringing).toBe(true)
 		expect(ui.chimes).toBe(1)
+	})
+
+	it('should ring from the moment your hours are done, and keep ringing until you check out', async () => {
+		await store.saveSettings({ minHours: 8 })
+		at('2026-10-12T09:00:00')
+		await cmd.confirmAttendance('in')
+
+		at('2026-10-12T16:59:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(false)
+
+		at('2026-10-12T17:00:00') // eight hours in, before the shift ends
+		await engine.tick()
+		expect(ui.ringing).toBe(true)
+		expect(ui.notes).toContain('checkout')
+		// Whatever card was already up is answered first; then the check-out card.
+		// The hour's card comes first; once the day is written down, the check-out card.
+		expect(await pending()).toMatchObject({ kind: 'prompt' })
+		const ctx = await cmd.promptContext(true)
+		await cmd.saveEntry({ slotStart: ctx.slotStart, slotEnd: ctx.slotEnd, text: 'eight hours of work', minutes: 480 })
+		await engine.clearPending()
+		at('2026-10-12T17:01:00')
+		await engine.tick()
+		expect(await pending()).toMatchObject({ kind: 'wrapup', blocking: true })
+		expect((await cmd.state()).checkoutRinging).toBe(true)
+
+		// Answering the card stops the sound; the next tick starts it again.
+		await engine.clearPending()
+		expect(ui.ringing).toBe(false)
+		at('2026-10-12T17:20:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(true)
+		expect(ui.notes.filter((n) => n === 'checkout')).toHaveLength(1) // told once, rung throughout
+
+		// Checking out silences it at once, not on the next tick.
+		await cmd.confirmAttendance('out')
+		expect(ui.ringing).toBe(false)
+		expect((await cmd.state()).checkoutRinging).toBe(false)
+	})
+
+	it('should ring at shift end after a late start, before the hours are in', async () => {
+		await store.saveSettings({ minHours: 8 })
+		at('2026-10-12T12:00:00')
+		await cmd.confirmAttendance('in')
+		at('2026-10-12T18:29:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(false)
+		at('2026-10-12T18:31:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(true)
+	})
+
+	it('should go quiet for the day when you are working late', async () => {
+		at('2026-10-12T09:00:00')
+		await cmd.confirmAttendance('in')
+		at('2026-10-12T18:00:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(true)
+
+		await cmd.workingLate()
+		expect(ui.ringing).toBe(false)
+		at('2026-10-12T19:00:00')
+		await engine.tick()
+		expect(ui.ringing).toBe(false)
+	})
+
+	it('should not ring over a meeting, and should ring again when it ends', async () => {
+		at('2026-10-12T09:00:00')
+		await cmd.confirmAttendance('in')
+		await cmd.saveMeeting({ name: 'Late sync', time: '17:30', days: [1, 2, 3, 4, 5], leadMinutes: 0, logMinutes: 30 })
+		at('2026-10-12T17:40:00')
+		await engine.tick()
+		expect((await cmd.state()).checkoutRinging).toBe(false)
+		expect(ui.notes).not.toContain('checkout')
+		at('2026-10-12T18:05:00')
+		await engine.tick()
+		expect((await cmd.state()).checkoutRinging).toBe(true)
+		expect(ui.ringing).toBe(true)
+	})
+
+	it('should stay silent when you turned the check-out alarm off', async () => {
+		await store.saveSettings({ alarmCheckOut: false })
+		at('2026-10-12T09:00:00')
+		await cmd.confirmAttendance('in')
+		at('2026-10-12T18:00:00')
+		await engine.tick()
+		expect(ui.notes).not.toContain('checkout')
+		expect(ui.rings).toBe(0)
 	})
 
 	it('should suggest a break after a long stretch, once per stretch', async () => {
@@ -3974,10 +4064,14 @@ describe('the day you forgot to close', () => {
 		at('2026-10-12T22:10:00')
 		await engine.tick()
 		await cmd.dismiss().catch(() => undefined)
+		// The check-out alarm rings until check-out by design; Working late is
+		// how an evening is taken back, and then nothing rings again.
+		await cmd.workingLate()
 		const rings = ui.rings
 		at('2026-10-12T22:40:00')
 		await engine.tick()
 		expect(ui.rings).toBe(rings)
+		expect(ui.notes.filter((n) => n === 'wrapup')).toHaveLength(1) // the last call is said once
 	})
 
 	it('should catch it the next morning when nothing was running to ring', async () => {

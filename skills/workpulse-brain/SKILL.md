@@ -95,11 +95,18 @@ under other tickets** (`--about`; the SessionStart hook uses the branch's words)
 back (30 days), open follow-ups, and requests the user sent from the extension's inbox. Say in one line what you
 are taking from it.
 
-3. When the task touches something that has gone wrong before, or the user asks "have I seen this", search
-before guessing. Filters narrow it; the rest are words:
+3. **Lessons arrive on their own, per prompt.** With the UserPromptSubmit hook (`setup` → question 4, or the
+   plugin), every prompt that shares at least two real words with a recorded learning, mistake, debug,
+   decision or skill gets up to three of them as context ("WorkPulse Brain — lessons recorded before…"). Use
+   them when they apply and say so in one line; ignore them when they don't. It reads the local clone (the
+   SessionStart brief pulls), shows each lesson once per session, and stays quiet for commands and short
+   replies. Try it by hand: `node $WP recall "write the reel script"`.
+
+4. When the task touches something that has gone wrong before, or the user asks "have I seen this", search
+before guessing. Filler words are ignored and word forms meet (script ≈ scripting). Filters narrow it; the rest are words:
 
 ```bash
-node $WP search "idempotency retry"                       # ranked: title, then subtitle and tags, then the rest
+node $WP search "idempotency retry"                       # ranked: more of your words first; title, then subtitle and tags, then the rest
 node $WP search "type:mistake #forms"                     # every mistake tagged forms
 node $WP search "ticket:PAY-2433 has:next-action"         # where that ticket was left
 node $WP search "repo:payments status:open after:14d"     # open work on a repo, last two weeks
@@ -132,6 +139,30 @@ node $WP worklog "Reviewed payment PR" --from 2026-10-28T10:00:00+05:30 --to 202
 Keep the description factual and one line. Omit `--job` only when the user
 will select the job in Review. Never run a Zoho push; the extension owns that
 manual, visible step.
+
+### Scan Claude Code activity (only when asked or configured by the user)
+
+`scan-claude` reads only timestamps from local Claude transcript JSONL files.
+It never copies prompts, answers, secrets, or customer text into a work log.
+It splits at idle gaps and caps every proposal at two hours, then commits
+idempotent records to the private bridge. The extension imports them into
+**Your time logs** on **Sync now**; the user can edit job, description, start,
+end and total before pressing the one visible **Push to Zoho** action.
+
+```bash
+node $WP scan-claude --since 24h --gap 20 --max-session 120 --job ZOHO_JOB_ID --ticket PAY-2433
+```
+
+- Default `--since` is `24h`; accepted values are `30m`, `8h`, `2d`, `1w`.
+- Default idle `--gap` is 20 minutes. Use a smaller gap for short focused work.
+- `--max-session` must stay between 5 and 120 minutes. Do not raise it beyond
+  two hours: long inferred spans must be reviewed in smaller pieces.
+- Do not run it automatically at session end. Ask the user, or follow their
+  explicit recurring rule. A transcript is activity evidence, not proof of
+  billable time.
+- If local extension data was restored or cleared, **Sync now** imports a
+  bridge interval again exactly once; the local row, not an old cache marker,
+  is the restore authority.
 
 Record the moment it happens, not at the end, when one of these occurs:
 

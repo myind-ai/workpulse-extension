@@ -224,7 +224,7 @@ export function SettingsView({ find: initialFind }: { find?: string }) {
 					<label className="wp-row" style={{ gap: 8 }}>
 						<input type="checkbox" checked={form.alarmCheckOut} disabled={!form.sound} onChange={(e) => set('alarmCheckOut', e.target.checked)} />
 						<span>
-							Ring at the end of the shift <span className="wp-muted wp-small">— so the day gets closed</span>
+							Ring when the working day is over <span className="wp-muted wp-small">— at your hours or shift end, whichever comes first, until you check out or press Working late</span>
 						</span>
 					</label>
 					<label className="wp-row" style={{ gap: 8 }}>

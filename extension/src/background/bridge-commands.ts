@@ -69,9 +69,17 @@ export class BridgeCommands extends PageCommands {
 			for (const line of body.split('\n')) {
 				try {
 					const w = JSON.parse(line) as { schema?: string; id?: string; from?: number; to?: number; text?: string; jobId?: string }
-					if (w.schema !== 'workpulse.worklog/1' || !w.id || seen.has(w.id) || !Number.isFinite(w.from) || !Number.isFinite(w.to) || w.to! <= w.from! || w.to! > now || typeof w.text !== 'string' || !w.text.trim()) continue
+					if (w.schema !== 'workpulse.worklog/1' || !w.id || !Number.isFinite(w.from) || !Number.isFinite(w.to) || w.to! <= w.from! || w.to! > now || typeof w.text !== 'string' || !w.text.trim()) continue
 					const minutes = Math.round((w.to! - w.from!) / 60_000)
 					if (minutes < 1 || minutes > 12 * 60) continue
+					// `seen` protects normal polling. The local row is the authority:
+					// after a restore/clear it may be absent while its bridge record is
+					// still valid, and Sync must bring it back.
+					const local = await this.store.entries(istDate(w.from!))
+					if (local.some((e) => e.bridgeWorklogId === w.id)) {
+						seen.add(w.id)
+						continue
+					}
 					await this.store.addEntry({ date: istDate(w.from!), slotStart: w.from!, slotEnd: w.to!, text: w.text.trim().slice(0, 500), jobId: w.jobId || undefined, minutes, kind: 'work', auto: true, bridgeWorklogId: w.id })
 					seen.add(w.id)
 					added++
@@ -80,7 +88,7 @@ export class BridgeCommands extends PageCommands {
 				}
 			}
 		}
-		if (added) await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, importedWorklogs: [...seen].slice(-2000) }))
+		if (added || seen.size !== (rt.bridge?.importedWorklogs ?? []).length) await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, importedWorklogs: [...seen].slice(-2000) }))
 		return added
 	}
 	private async bridgeGithub(): Promise<GitHub | null> {

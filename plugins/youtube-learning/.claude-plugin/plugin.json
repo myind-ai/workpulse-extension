@@ -1,0 +1,11 @@
+{
+  "name": "youtube-learning",
+  "displayName": "YouTube Learning",
+  "version": "0.2.0",
+  "description": "Share a YouTube, Instagram, TikTok or other video link and Claude saves the video, subtitles, a timestamped transcript and metadata with yt-dlp, writes learning notes from the whole transcript, and records the takeaways in the WorkPulse Brain.",
+  "author": { "name": "myind-ai", "url": "https://github.com/myind-ai" },
+  "homepage": "https://github.com/myind-ai/workpulse-extension/tree/main/plugins/youtube-learning",
+  "repository": "https://github.com/myind-ai/workpulse-extension",
+  "license": "MIT",
+  "keywords": ["youtube", "instagram", "reels", "tiktok", "video", "yt-dlp", "transcript", "subtitles", "notes", "learning"]
+}

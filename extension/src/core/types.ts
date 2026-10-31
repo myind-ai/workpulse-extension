@@ -348,6 +348,12 @@ export interface DayFlags {
 	learnAsked: boolean
 	/** The last call before an open day becomes a regularisation. */
 	lastCallTold?: boolean
+	/** The check-out alarm is ringing: from the end of the working day until check-out. */
+	checkoutRinging?: boolean
+	/** The check-out card was raised for it — once, so it never follows you around. */
+	checkoutCardShown?: boolean
+	/** "Working late" was pressed: the check-out alarm is quiet for the rest of today. */
+	workingLate?: boolean
 	/** The date the week was reviewed, so the Friday card comes once. */
 	weekReviewed?: string
 }

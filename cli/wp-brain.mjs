@@ -22,6 +22,7 @@
 //                [--asked T] [--done T] [--root-cause T] [--status S] [--pr URL] [--commit SHA]… [--related K]… [--next T]… [--tags a,b]
 //   wp-brain add --json FILE|-          one entry or an array, e.g. a whole ticket session
 //                                       (an entry already there with the same kind and title is skipped; --force adds it)
+//   wp-brain recall ["words"]   lessons close to a prompt (UserPromptSubmit hook; reads stdin when no words)
 //   wp-brain brief [TICKET] [--project P] [--about "words"]   what to know before starting (+ related learnings)
 //   wp-brain list [--kind K] [--scope S] [--ticket K] [--project P] [--query Q] [--limit N] [--archived]
 //   wp-brain edit ID [--title T] [--subtitle T] [--body T] [--tags a,b] [--root-cause T] [--next T]… [--status S] [--kind K]
@@ -36,6 +37,7 @@
 //                                  --plugin: from the plugin — offers the link when nothing is set up)
 //   wp-brain stop-check [--plugin] (Claude Code Stop hook: once per session, ask to record committed work)
 //   wp-brain sync
+//   wp-brain scan-claude [--since 24h] [--gap 20] [--max-session 120] [--job ZOHO_JOB_ID] [--ticket PAY-123]
 //   wp-brain worklog "summary" --minutes 30 [--job ZOHO_JOB_ID] [--ticket PAY-123]
 //   wp-brain worklog "summary" --from 2026-10-28T10:00:00+05:30 --to 2026-10-28T10:45:00+05:30 [--job ZOHO_JOB_ID]
 //
@@ -44,6 +46,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,7 +58,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 })
 const { EDITABLE, KINDS, ROOT, appendLine, duplicateOf, entriesPath, entryByRef, filter, fold, newEntry, reportMarkdown, secretsIn, shortId, summarise } = bridge
 const { brainIndex, brainRecord } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
-const { searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-query.ts'))
+const { recallFor, searchBrain } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-query.ts'))
 const { doctor, ensureRepo, extensionSteps, nudgeText, settingsHasHook, setup } = await import(join(here, 'setup.mjs'))
 
 const CONFIG = process.env.WP_BRAIN_CONFIG || join(homedir(), '.config', 'workpulse', 'brain.json')
@@ -188,6 +191,50 @@ function fromBackup(cfg) {
 function die(msg) {
 	console.error(msg)
 	process.exit(1)
+}
+
+/** Transcript contents are never copied into a timesheet.  Claude's event
+ * timestamps are only a bounded activity clock, split at idle gaps. */
+function claudeTranscriptFiles(dir, out = []) {
+	if (!existsSync(dir)) return out
+	for (const item of readdirSync(dir, { withFileTypes: true })) {
+		const path = join(dir, item.name)
+		if (item.isDirectory()) claudeTranscriptFiles(path, out)
+		else if (item.isFile() && item.name.endsWith('.jsonl')) out.push(path)
+	}
+	return out
+}
+
+function claudeSessions({ since, gapMinutes, maxMinutes }) {
+	const root = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+	const projects = join(root, 'projects')
+	const records = []
+	for (const file of claudeTranscriptFiles(projects)) {
+		let lines
+		try { lines = readFileSync(file, 'utf8').split('\n') } catch { continue }
+		const events = []
+		for (const line of lines) {
+			try {
+				const row = JSON.parse(line)
+				const at = Date.parse(row.timestamp)
+				if (Number.isFinite(at) && at >= since && (row.type === 'user' || row.type === 'assistant')) events.push(at)
+			} catch { /* Ignore a partially written JSONL line. */ }
+		}
+		events.sort((a, b) => a - b)
+		if (!events.length) continue
+		const project = file.slice(projects.length).split('/')[1] || 'Claude Code'
+		let start = events[0]
+		let last = events[0]
+		const finish = () => {
+			if (last - start >= 60_000) records.push({ file, project, from: start, to: last })
+		}
+		for (const at of events.slice(1)) {
+			if (at - last > gapMinutes * 60_000 || at - start >= maxMinutes * 60_000) { finish(); start = at }
+			last = at
+		}
+		finish()
+	}
+	return records.sort((a, b) => a.from - b.from)
 }
 
 const day = (t) => new Date(t).toISOString().slice(0, 10)
@@ -367,6 +414,46 @@ const commands = {
 		console.log(`Work log saved: ${Math.round((to - from) / 60_000)}m${record.jobId ? ` · ${record.jobId}` : ''}${pushed && !opt['no-push'] ? ' · synced to WorkPulse' : ' · committed locally'}.`)
 	},
 
+	/** Turn local Claude Code activity into conservative, reviewable WorkPulse
+	 * intervals.  The browser still imports these locally and the user makes the
+	 * final, visible Zoho push. */
+	'scan-claude'({ opt }) {
+		const sinceText = String(opt.since ?? '24h')
+		const duration = sinceText.match(/^(\d+(?:\.\d+)?)([hmwd])$/i)
+		if (!duration) die('Use --since like 8h, 2d or 1w.')
+		const unit = duration[2].toLowerCase()
+		const multiplier = unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : unit === 'd' ? DAY : 7 * DAY
+		const gapMinutes = Number(opt.gap ?? 20)
+		const maxMinutes = Number(opt['max-session'] ?? 120)
+		if (!Number.isFinite(gapMinutes) || gapMinutes < 1 || gapMinutes > 120) die('--gap must be between 1 and 120 minutes.')
+		if (!Number.isFinite(maxMinutes) || maxMinutes < 5 || maxMinutes > 120) die('--max-session must be between 5 and 120 minutes.')
+		const now = Date.now()
+		const sessions = claudeSessions({ since: now - Number(duration[1]) * multiplier, gapMinutes, maxMinutes })
+		if (!sessions.length) return console.log('No Claude Code intervals found. Nothing was logged.')
+		const cfg = config()
+		pull(cfg)
+		const changes = new Map()
+		let added = 0
+		for (const session of sessions) {
+			const safeProject = session.project.replace(/^[-_]+|[-_]+$/g, '').replace(/[-_]+/g, ' ').slice(-120) || 'Claude Code'
+			const id = `claude:${createHash('sha256').update(`${session.file}:${session.from}:${session.to}`).digest('hex').slice(0, 32)}`
+			const rel = `${ROOT}/worklogs/${new Date(session.from).toISOString().slice(0, 7)}/${cfg.device}.jsonl`
+			const current = changes.get(rel) ?? (existsSync(join(cfg.clone, rel)) ? readFileSync(join(cfg.clone, rel), 'utf8') : '')
+			if (current.split('\n').some((line) => line.includes(`"id":"${id}"`))) continue
+			const record = { schema: 'workpulse.worklog/1', id, at: now, device: cfg.device, from: session.from, to: session.to, text: `Claude Code work · ${safeProject}`, source: 'claude-transcript', ...(opt.job ? { jobId: String(opt.job) } : {}), ...(opt.ticket ? { ticket: String(opt.ticket).toUpperCase() } : {}) }
+			changes.set(rel, `${current.replace(/\n*$/, '\n')}${JSON.stringify(record)}\n`)
+			added++
+		}
+		if (!added) return console.log('Claude Code intervals are already queued. Nothing new was logged.')
+		for (const [rel, content] of changes) {
+			const abs = join(cfg.clone, rel)
+			mkdirSync(dirname(abs), { recursive: true })
+			writeFileSync(abs, content)
+		}
+		const pushed = commitAndPush(cfg, [...changes.keys()], `worklog: ${added} Claude Code interval${added === 1 ? '' : 's'}`, !opt['no-push'])
+		console.log(`${added} Claude Code interval${added === 1 ? '' : 's'} saved (idle gap ${gapMinutes}m; each no longer than ${maxMinutes}m)${pushed && !opt['no-push'] ? ' · synced to WorkPulse.' : ' · committed locally.'}`)
+	},
+
 	brief({ pos, opt }) {
 		const cfg = config()
 		pull(cfg)
@@ -451,6 +538,34 @@ const commands = {
 				reason: `This session committed work on ${key} and nothing is recorded in the WorkPulse Brain for it yet. Before stopping, use the workpulse-brain skill: write one ticket entry for ${key} (asked, done, root cause, honest status, next, PR/commits) plus any mistakes and learnings from this session with \`node ${fileURLToPath(import.meta.url)} add --json -\`. If this was trivial, say so in one line instead and stop.`,
 			}),
 		)
+	},
+
+	/**
+	 * For a Claude Code UserPromptSubmit hook: the few past lessons (learnings, mistakes, debugs, decisions, skills) that
+	 * share real words with this prompt, put in front of Claude before it answers. Reads the local clone only, so it is
+	 * fast and works offline (the SessionStart brief pulls). Silent when nothing is close enough, when the Brain is not
+	 * set up, and for an entry already shown in this session. `wp-brain recall "words"` prints the same thing.
+	 */
+	recall({ pos, opt }) {
+		if (opt.plugin && settingsHasHook('wp-brain.mjs recall')) return
+		if (!existsSync(CONFIG)) return
+		const typed = pos.join(' ').trim()
+		const { input, session } = typed ? { input: {}, session: null } : sessionContext()
+		const prompt = typed || (typeof input.prompt === 'string' ? input.prompt : '')
+		const cfg = config()
+		if (!existsSync(cfg.clone)) return
+		const markPath = session ? join(SESSIONS, `${session}.recall.json`) : null
+		const seen = new Set(markPath && existsSync(markPath) ? JSON.parse(readFileSync(markPath, 'utf8')) : [])
+		const got = recallFor(readAll(cfg), prompt, Number(opt.limit) || 3).filter(({ e }) => !seen.has(e.id))
+		if (!got.length) return typed ? console.log('Nothing recorded is close enough to that.') : undefined
+		const lines = got.map(({ e }) => `- ${short(e)}${e.rootCause ? `\n    root cause: ${e.rootCause}` : ''}${e.body ? `\n    ${e.body.split('\n')[0].slice(0, 240)}` : ''}`)
+		if (typed) return console.log(lines.join('\n'))
+		if (markPath) {
+			mkdirSync(SESSIONS, { recursive: true })
+			writeFileSync(markPath, JSON.stringify([...seen, ...got.map(({ e }) => e.id)]))
+		}
+		const text = ['WorkPulse Brain — lessons recorded before that look relevant to this request (use them if they apply; ignore them if not; `wp-brain search` finds more):', ...lines].join('\n')
+		process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text.slice(0, 3000) } }))
 	},
 
 	list({ opt }) {

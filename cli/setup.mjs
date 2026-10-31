@@ -220,7 +220,7 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 		}
 		const branch = await ask(rl, opt.branch, '2. Branch (the same as the extension’s Backup → Branch; "-" for the default branch)', 'brain')
 		const device = await ask(rl, opt.device, '3. This machine’s name in the Brain', `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`)
-		const brief = yes(await ask(rl, opt.brief, '4. Brief Claude at the start of every session on a ticket branch? (SessionStart hook) y/n', 'y'))
+		const brief = yes(await ask(rl, opt.brief, '4. Brief Claude at the start of every session on a ticket branch, and put relevant past lessons in front of each prompt? (SessionStart + UserPromptSubmit hooks) y/n', 'y'))
 		const record = yes(await ask(rl, opt.record, '5. Ask Claude once to record the session after a commit? (Stop hook) y/n', 'y'))
 		const rule = yes(await ask(rl, opt.rule, '6. Add the WorkPulse Brain rule to ~/.claude/CLAUDE.md? y/n', 'y'))
 		const skill = yes(await ask(rl, opt.skill, '7. Link the workpulse-brain skill into ~/.claude/skills? y/n', 'y'))
@@ -239,6 +239,9 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 		const node = `node ${cliPath}`
 		if (brief) placeHook(settings, 'SessionStart', `${node} hook 2>/dev/null || true`, 'wp-brain.mjs hook', { statusMessage: 'WorkPulse Brain brief…' })
 		else removeHook(settings, 'SessionStart', 'wp-brain.mjs hook')
+		// Recall goes with the brief: one is the start of a session, the other each prompt in it.
+		if (brief) placeHook(settings, 'UserPromptSubmit', `${node} recall 2>/dev/null || true`, 'wp-brain.mjs recall')
+		else removeHook(settings, 'UserPromptSubmit', 'wp-brain.mjs recall')
 		if (record) placeHook(settings, 'Stop', `${node} stop-check 2>/dev/null || true`, 'wp-brain.mjs stop-check')
 		else removeHook(settings, 'Stop', 'wp-brain.mjs stop-check')
 		const after = JSON.stringify(settings, null, 2) + '\n'
@@ -246,7 +249,7 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 			if (existsSync(settingsPath)) copyFileSync(settingsPath, `${settingsPath}.wp-brain.bak`)
 			writeFileSync(settingsPath, after)
 		}
-		console.log(`${brief ? '✓' : '–'} SessionStart brief   ${record ? '✓' : '–'} Stop record   → ${settingsPath}${after !== before ? ' (backup: settings.json.wp-brain.bak)' : ' (unchanged)'}`)
+		console.log(`${brief ? '✓' : '–'} SessionStart brief + prompt recall   ${record ? '✓' : '–'} Stop record   → ${settingsPath}${after !== before ? ' (backup: settings.json.wp-brain.bak)' : ' (unchanged)'}`)
 
 		// 6: the global rule.
 		if (rule) {
@@ -331,16 +334,18 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 	const has = (event, mark) => (settings.hooks?.[event] ?? []).flatMap((g) => g.hooks ?? []).find((h) => String(h.command ?? '').includes(mark))
 	const start = has('SessionStart', 'wp-brain.mjs hook')
 	const stop = has('Stop', 'wp-brain.mjs stop-check')
+	const recall = has('UserPromptSubmit', 'wp-brain.mjs recall')
 	const points = (h) => !h || String(h.command).includes(cliPath)
 	// Installed as a Claude Code plugin: the hooks and the skill come from it.
 	const plugin = viaPlugin(claude, settings)
 	if (plugin) {
-		check(true, 'Plugin', `${plugin} — brings the skill and both hooks`, false)
-		if (start || stop) check(true, 'Hooks', 'settings.json has its own copy too; the plugin’s stay quiet, so nothing runs twice', false)
+		check(true, 'Plugin', `${plugin} — brings the skill and the three hooks`, false)
+		if (start || stop || recall) check(true, 'Hooks', 'settings.json has its own copy too; the plugin’s stay quiet, so nothing runs twice', false)
 		return report(rows)
 	}
 	check(!!start && points(start), 'SessionStart hook', start ? (points(start) ? 'installed' : `points at another copy: ${start.command}`) : 'not installed (setup → question 4)', false)
 	check(!!stop && points(stop), 'Stop hook', stop ? (points(stop) ? 'installed' : `points at another copy: ${stop.command}`) : 'not installed (setup → question 5)', false)
+	check(!!recall && points(recall), 'Prompt recall hook', recall ? (points(recall) ? 'installed' : `points at another copy: ${recall.command}`) : 'not installed (setup → question 4; relevant lessons are not shown per prompt)', false)
 	const md = existsSync(join(claude, 'CLAUDE.md')) ? readFileSync(join(claude, 'CLAUDE.md'), 'utf8') : ''
 	check(md.includes(START) || md.includes('## WorkPulse Brain'), 'Global rule', md.includes(START) ? 'installed' : md.includes('## WorkPulse Brain') ? 'present (hand-written; setup will replace it with the managed copy)' : 'not in CLAUDE.md (setup → question 6)', false)
 	const skill = join(claude, 'skills', 'workpulse-brain', 'SKILL.md')

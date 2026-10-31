@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { lastCallDue, leftAt, needsClosing, regularisationNote } from './closeout'
+import { checkoutAlarmDue, lastCallDue, leftAt, needsClosing, regularisationNote, workEndsAt } from './closeout'
 import { parseIst } from './time'
 
 const at = (hhmm: string) => parseIst(`2026-10-15T${hhmm}:00`)
@@ -70,5 +70,34 @@ describe('the last call before it becomes a regularisation', () => {
 
 	it('should write the sentence the form wants', () => {
 		expect(regularisationNote('2026-10-15', '19:42', 'when the machine went quiet')).toContain('Worked until about 19:42')
+	})
+})
+
+describe('the check-out alarm', () => {
+	const s = { checkedInAt: at('09:00'), minHours: 8, shiftEnd: at('19:00'), isOff: false, workingLate: false, inMeeting: false }
+
+	it('should end the day at the hours or the shift end, whichever comes first', () => {
+		expect(workEndsAt(at('09:00'), 8, at('19:00'))).toBe(at('17:00'))
+		expect(workEndsAt(at('12:00'), 8, at('19:00'))).toBe(at('19:00'))
+	})
+
+	it('should ring from the end of the working day, and keep ringing', () => {
+		expect(checkoutAlarmDue({ ...s, now: at('16:59') })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, now: at('17:00') })).toBe(true)
+		expect(checkoutAlarmDue({ ...s, now: at('21:30') })).toBe(true)
+	})
+
+	it('should ring at shift end after a late start', () => {
+		expect(checkoutAlarmDue({ ...s, checkedInAt: at('12:00'), now: at('18:59') })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, checkedInAt: at('12:00'), now: at('19:00') })).toBe(true)
+	})
+
+	it('should stop for a check-out, working late, a meeting or a day off', () => {
+		const now = at('17:30')
+		expect(checkoutAlarmDue({ ...s, now, checkedOutAt: at('17:20') })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, now, workingLate: true })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, now, inMeeting: true })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, now, isOff: true })).toBe(false)
+		expect(checkoutAlarmDue({ ...s, now, checkedInAt: undefined })).toBe(false)
 	})
 })

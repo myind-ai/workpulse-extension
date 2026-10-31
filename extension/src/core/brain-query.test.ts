@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { BridgeEntry } from './bridge'
-import { describeFilters, matchBrain, parseBrainQuery, relatedTo, samePage, searchBrain, whenOf } from './brain-query'
+import { describeFilters, matchBrain, parseBrainQuery, recallFor, relatedTo, samePage, searchBrain, stem, whenOf } from './brain-query'
 
 const NOW = Date.UTC(2026, 9, 27, 12)
 const base: BridgeEntry = { schema: 'workpulse.bridge.entry/1', id: 'e1', at: Date.UTC(2026, 9, 20), device: 'cli-a', kind: 'debug', scope: 'work', title: 'Retry webhook reused key' }
@@ -93,5 +93,55 @@ describe('searchBrain with filters', () => {
 		expect(searchBrain([a, b, c], 'webhook ticket:PAY-1').map((x) => x.e.id)).toEqual(['a'])
 		expect(searchBrain([a, b, c], 'has:next-action').map((x) => x.e.id)).toEqual(['c', 'a'])
 		expect(searchBrain([a, b, c], 'webhook').map((x) => x.e.id)).toEqual(['b', 'a'])
+	})
+})
+
+describe('searchBrain ranking', () => {
+	// The real miss of 2026-10-30: "write an ad script hook" put a Write-tool mistake and an unrelated note above the
+	// scripting lessons, because "an" and "write" counted and "script" never met "scripting".
+	const lesson = e({ id: 'lesson', kind: 'learning', at: 1, title: 'Open every script with Promise-Proof-Plan', tags: ['youtube', 'scripting'] })
+	const writeTool = e({ id: 'tool', kind: 'mistake', at: 2, title: 'Write tool turned escapes into real characters in a content script', tags: ['tooling'] })
+	const noise = e({ id: 'noise', kind: 'learning', at: 3, title: 'To edit in an append-only store, write a change record', tags: ['sync'] })
+
+	it('ignores filler words', () => {
+		expect(searchBrain([noise], 'an the to in').map((x) => x.e.id)).toEqual([])
+	})
+
+	it('matches word forms: script, scripts, scripting', () => {
+		expect(stem('scripting')).toBe('script')
+		expect(stem('scripts')).toBe('script')
+		expect(stem('hooks')).toBe('hook')
+		expect(stem('class')).toBe('class')
+		expect(stem('promised')).toBe(stem('promise'))
+		expect(searchBrain([lesson], 'scripts').map((x) => x.e.id)).toEqual(['lesson'])
+	})
+
+	it('an entry matching more of the words beats one matching a single word', () => {
+		const got = searchBrain([noise, writeTool, lesson], 'write an ad script promise hook').map((x) => x.e.id)
+		expect(got[0]).toBe('lesson')
+		expect(got.indexOf('noise')).toBeGreaterThan(got.indexOf('lesson'))
+	})
+
+	it('reports how many query words each entry has', () => {
+		expect(searchBrain([lesson], 'script promise hook')[0].matched).toBe(2)
+	})
+})
+
+describe('recallFor', () => {
+	const lesson = e({ id: 'lesson', kind: 'learning', title: 'Open every script with Promise-Proof-Plan: the result promised in the thumbnail', tags: ['youtube', 'scripting'] })
+	const ticket = e({ id: 'ticket', kind: 'ticket', title: 'Script the thumbnail promise for the launch reel' })
+
+	it('brings back lessons that share at least two words with the prompt', () => {
+		expect(recallFor([lesson, ticket], 'write the reel script and thumbnail for my app').map((x) => x.e.id)).toEqual(['lesson'])
+	})
+
+	it('stays quiet for one shared word, commands, and prompts with nothing to go on', () => {
+		expect(recallFor([lesson], 'fix the flaky script in CI please today')).toEqual([])
+		expect(recallFor([lesson], '/code-review script thumbnail')).toEqual([])
+		expect(recallFor([lesson], 'yes do it')).toEqual([])
+	})
+
+	it('ignores URLs and filter-looking words in the prompt', () => {
+		expect(recallFor([lesson], 'https://youtube.com/watch?v=script ok')).toEqual([])
 	})
 })

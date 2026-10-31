@@ -12,6 +12,11 @@
       "name": "jira-ticket-update",
       "source": "./plugins/jira-ticket-update",
       "description": "Comment on and move Jira tickets on commit, PR or session end, always asking first, through the Atlassian MCP."
+    },
+    {
+      "name": "youtube-learning",
+      "source": "./plugins/youtube-learning",
+      "description": "Share a YouTube, Instagram or other video link: video, caption, subtitles, timestamped transcript and metadata saved with yt-dlp, notes written, takeaways sent to the Brain."
     }
   ]
 }

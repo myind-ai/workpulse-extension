@@ -86,6 +86,18 @@ export function WrapupView({ ctx }: { ctx: { date: string; loggedMinutes: number
 				<div className="wp-muted">Nothing here is typed except tomorrow's first task — the rest is what you logged.</div>
 			</div>
 
+			{/* The alarm is why this card is up: say what stops it, at the top. */}
+			{today?.checkoutRinging && !checkedOut && (
+				<div className="wp-banner">
+					<span className="wp-grow">
+						<strong>Your working day is over.</strong> The alarm rings until you check out.
+					</span>
+					<button className="wp-btn wp-btn-sm" disabled={busy} onClick={() => run(() => call('workingLate'))}>
+						Working late
+					</button>
+				</div>
+			)}
+
 			<div className="wp-card-flat wp-stack-sm">
 				<div className="wp-between">
 					<span className="wp-muted">Logged today</span>

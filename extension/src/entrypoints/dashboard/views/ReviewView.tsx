@@ -71,6 +71,7 @@ export function ReviewView({ date }: { date?: string }) {
 	const { data: s } = useLive(() => call('state'))
 	const [rows, setRows] = useState<Row[]>([])
 	const [result, setResult] = useState<PushResult | null>(null)
+	const [bridgeNotice, setBridgeNotice] = useState<string | null>(null)
 	const [timeError, setTimeError] = useState<string | null>(null)
 	const [copied, setCopied] = useState<number | 'all' | null>(null)
 	const [manual, setManual] = useState({ from: '', to: '', text: '', jobId: '' })
@@ -190,6 +191,16 @@ export function ReviewView({ date }: { date?: string }) {
 			await reload()
 		})
 
+	const syncClaudeLogs = () =>
+		run(async () => {
+			setBridgeNotice(null)
+			const bridge = await call('bridge')
+			if (!bridge.ready) throw new Error('Connect your private GitHub repository in Settings → Backup before syncing Claude logs.')
+			const synced = await call('pollBridge', true)
+			await reload()
+			setBridgeNotice(synced.changed ? `${synced.changed} update${synced.changed === 1 ? '' : 's'} brought into Your time logs.` : 'Already up to date — no new Claude logs found.')
+		})
+
 	return (
 		<div className="wp-stack" style={{ gap: 20 }}>
 			<div className="wp-page-head">
@@ -213,6 +224,9 @@ export function ReviewView({ date }: { date?: string }) {
 					<h1 className="wp-title">Review & timesheet</h1>
 				</div>
 				<div className="wp-row-wrap">
+					<button className="wp-btn wp-btn-sm wp-btn-soft" disabled={busy} onClick={syncClaudeLogs} title="Fetch Claude Code work logs from your private GitHub bridge">
+						<Icon name="refresh" size={14} /> Sync Claude logs
+					</button>
 					{!isToday && (
 						<a className="wp-btn wp-btn-sm" href="#/review">
 							Today
@@ -293,6 +307,7 @@ export function ReviewView({ date }: { date?: string }) {
 				</div>
 
 			</div>
+			{bridgeNotice && <div className="wp-banner wp-small">{bridgeNotice}</div>}
 
 			{/* What was logged is above; this is what was not. A list of entries
 			    hides a gap, because a gap is an absence of rows and an absence of

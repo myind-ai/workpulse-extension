@@ -2,10 +2,10 @@
   "name": "workpulse-brain",
   "displayName": "WorkPulse Brain",
 	"version": "1.6.3",
-  "description": "A memory of every ticket, mistake and learning, kept in your own private GitHub repository and shared with the WorkPulse browser extension. Briefs Claude before a ticket and asks it to record the session after a commit.",
+  "description": "Private ticket memory and reviewable time logs for Claude Code, shared with the WorkPulse extension through your own GitHub repository. Zoho stays a visible extension action.",
   "author": { "name": "myind-ai", "url": "https://github.com/myind-ai" },
   "homepage": "https://github.com/myind-ai/workpulse-extension",
   "repository": "https://github.com/myind-ai/workpulse-extension",
   "license": "MIT",
-  "keywords": ["memory", "tickets", "learnings", "github", "workpulse"]
+  "keywords": ["memory", "tickets", "learnings", "time-tracking", "github", "workpulse"]
 }

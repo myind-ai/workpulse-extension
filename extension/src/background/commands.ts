@@ -5,7 +5,7 @@ import { API_ENABLED } from '@/core/features'
 import { promptEvery } from '@/core/reminders'
 import { awayMinutes, awayNote, groupEntries, isWorkDay } from '@/core/rules'
 import { addDays, atIst, fmtMinutes, isHHMM, istDate, istTime, istWeekday, MIN } from '@/core/time'
-import type { Day, Entry, Issue, Job, PendingKind, Settings, Task } from '@/core/types'
+import { emptyFlags, type Day, type Entry, type Issue, type Job, type PendingKind, type Settings, type Task } from '@/core/types'
 import { allowed } from '@/core/zoho-parse'
 import { answerTask, createTask, deleteTask, runningTimer, startTimer, stopTimer, tasksToAsk, updateTask, type NewTask, type RunningTimer } from '@/lib/tasks'
 import { countWater, healthNotes, noteForNext, type HealthNote } from '@/core/health'
@@ -145,6 +145,8 @@ export interface TodayState {
 	snoozeUntil?: number
 	/** A quiet block in progress: when it ends, and what it is for. */
 	focus?: { taskUid?: string; startedAt: number; endsAt: number }
+	/** The check-out alarm is ringing (see Engine.checkoutAlarm). */
+	checkoutRinging: boolean
 }
 
 export class DayCommands {
@@ -209,7 +211,24 @@ export class DayCommands {
 			pendingDays,
 			snoozeUntil: rt.snoozeUntil,
 			focus: rt.focus,
+			checkoutRinging: rt.flags.date === today && !!rt.flags.checkoutRinging,
 		}
+	}
+
+	/**
+	 * "Working late": the check-out alarm stops for the rest of today. The day is
+	 * still open — the last call later tonight still rings — but the evening is
+	 * yours to decide, not the alarm's.
+	 */
+	async workingLate(): Promise<void> {
+		const today = istDate(this.now())
+		await this.store.updateRuntime((r) => {
+			if (r.flags.date !== today) r.flags = emptyFlags(today)
+			r.flags.workingLate = true
+			r.flags.checkoutRinging = false
+		})
+		this.env.ui.alarm?.(false)
+		this.env.ui.changed()
 	}
 
 	async overlayState() {

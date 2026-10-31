@@ -106,7 +106,9 @@ export default defineBackground(() => {
 		openPalette: () => openPalette(),
 		shareTeam: () => commands.pushTeam(),
 		pollTeam: () => commands.pollTeam(),
-		pollBridge: () => commands.pollBridge(),
+		// Review's “Sync Claude logs” is an intentional refresh, so preserve its
+		// force flag instead of accidentally serving the cached bridge tree.
+		pollBridge: (force = false) => commands.pollBridge(force),
 		capturePage: (of) => capturePage(of),
 		startClip: (seconds, id, mic) => startClip(seconds, id, mic),
 		async readBlob(id) {

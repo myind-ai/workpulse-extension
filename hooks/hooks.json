@@ -20,6 +20,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs\" recall --plugin 2>/dev/null || true"
+          }
+        ]
+      }
     ]
   }
 }

@@ -116,29 +116,86 @@ export function describeFilters(f: BrainFilters): string[] {
 	].filter((x): x is string => !!x)
 }
 
+/** Words that say nothing about the subject: they matched almost every entry and pushed the real ones down. */
+const FILLER = new Set(
+	`a an and are as at be but by can could did do does for from get got had has have he her him his how i if in into is it its
+	just let like make me more most my no not now of on or our out please so some than that the their them then there these they
+	this to too up us use was we were what when where which who why will with would yes you your all any also been both each
+	every few here new old one only other same should such very way want need know think tell give show check look see about
+	after again before being over under while because doing done going thing things work working it's i'm don't`.split(/\s+/),
+)
+
+/** One form per word, so script / scripts / scripting / scripted meet: a light suffix strip, not a dictionary. */
+export function stem(w: string): string {
+	let s = w
+	if (s.length > 5 && s.endsWith('ing')) s = s.slice(0, -3)
+	else if (s.length > 4 && s.endsWith('ies')) s = s.slice(0, -3) + 'y'
+	else if (s.length > 4 && s.endsWith('ed')) s = s.slice(0, -2)
+	else if (s.length > 4 && /(s|x|ch|sh)es$/.test(s)) s = s.slice(0, -2)
+	else if (s.length > 3 && s.endsWith('s') && !s.endsWith('ss')) s = s.slice(0, -1)
+	// promise / promised / promising all end as "promis"
+	return s.length > 4 && s.endsWith('e') ? s.slice(0, -1) : s
+}
+
 const terms = (text?: string) => [...new Set(String(text ?? '').toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}/g) ?? [])]
+
+/** The words that carry meaning, in one form each; hyphenated words count whole and by their parts. */
+const keys = (text?: string) =>
+	[...new Set(terms(text).flatMap((t) => (t.includes('-') ? [t, ...t.split('-').filter((p) => p.length > 1)] : [t])).filter((t) => !FILLER.has(t)).map(stem))]
 
 /**
  * Past work like this, best first, after the filters (`ticket:`, `type:` …). Title words count most, then the subtitle
- * and tags, then everything else written down; ties go to the newer entry.
+ * and tags, then everything else written down. Filler words never count, word forms meet (script ≈ scripting), and an
+ * entry that matches more of the words asked for beats one that matches one word many times; ties go to the newer entry.
+ * `matched` is how many different words of the query the entry has.
  */
-export function searchBrain(entries: BridgeEntry[], query: string, now = Date.now()): { e: BridgeEntry; score: number }[] {
+export function searchBrain(entries: BridgeEntry[], query: string, now = Date.now()): { e: BridgeEntry; score: number; matched: number }[] {
 	const { text, filters, filtered } = parseBrainQuery(query, now)
-	const wanted = terms(text)
+	const wanted = keys(text)
 	const pool = filtered ? entries.filter((e) => matchBrain(e, filters)) : entries
 	// Only filters: everything that passes them, newest first.
-	if (!wanted.length) return filtered ? pool.map((e) => ({ e, score: 1 })).sort((a, b) => b.e.at - a.e.at) : []
+	if (!wanted.length) return filtered ? pool.map((e) => ({ e, score: 1, matched: 0 })).sort((a, b) => b.e.at - a.e.at) : []
 	return pool
 		.map((e) => {
-			const title = terms(e.title)
-			const subtitle = terms(e.subtitle)
-			const tags = (e.tags ?? []).map((t) => t.toLowerCase())
-			const rest = terms([e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, ...(e.next ?? [])].filter(Boolean).join(' '))
-			const score = wanted.reduce((n, w) => n + (title.includes(w) ? 8 : 0) + (subtitle.includes(w) ? 5 : 0) + (tags.includes(w) ? 5 : 0) + (rest.includes(w) ? 2 : 0), 0)
-			return { e, score }
+			const title = keys(e.title)
+			const subtitle = keys(e.subtitle)
+			const tags = keys((e.tags ?? []).join(' '))
+			const rest = keys([e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, ...(e.next ?? [])].filter(Boolean).join(' '))
+			let matched = 0
+			const raw = wanted.reduce((n, w) => {
+				const s = (title.includes(w) ? 8 : 0) + (subtitle.includes(w) ? 5 : 0) + (tags.includes(w) ? 5 : 0) + (rest.includes(w) ? 2 : 0)
+				if (s) matched++
+				return n + s
+			}, 0)
+			// Coverage counts up to three words: a long question that shares three of its words is a full match.
+			return { e, score: Math.round((raw * matched) / Math.min(wanted.length, 3)), matched }
 		})
 		.filter((x) => x.score > 0)
 		.sort((a, b) => b.score - a.score || b.e.at - a.e.at)
+}
+
+/** What recall looks at: lessons, not ticket logs or time entries. */
+export const LESSON_KINDS = ['learning', 'mistake', 'debug', 'decision', 'skill']
+
+/**
+ * The few lessons worth putting in front of Claude for this prompt, or none. Strict on purpose, because it runs on every
+ * prompt: an entry must share at least two meaningful words with it (one when the prompt has only one or two) and score
+ * at least `min`. Prompts that are commands, scheduled checks or too short to say what they are about get nothing.
+ */
+export function recallFor(entries: BridgeEntry[], prompt: string, limit = 3, min = 12): { e: BridgeEntry; score: number; matched: number }[] {
+	const text = String(prompt ?? '').trim()
+	if (!text || text.startsWith('/')) return []
+	// Questions are usually short; a long paste (a log, a cron prompt) is ranked on its start only.
+	const head = text.slice(0, 600)
+	const words = keys(head).length
+	if (words < 2) return []
+	const need = words <= 2 ? 1 : 2
+	return searchBrain(
+		entries.filter((e) => LESSON_KINDS.includes(e.kind)),
+		head.replace(/\b[a-z]+:\S+/gi, ' '), // `type:x` and URLs are not filters here
+	)
+		.filter((x) => x.matched >= need && x.score >= min)
+		.slice(0, limit)
 }
 
 // ── the page you are on ─────────────────────────────────────────────────────
