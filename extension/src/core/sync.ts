@@ -39,7 +39,7 @@ export interface Backup {
  * Settings that are safe to write to a repository. A token, a client id and an
  * email are not: a backup that leaks a credential is worse than no backup.
  */
-const SECRET = new Set(['oauthClientId', 'email', 'syncToken', 'syncRepo'])
+const SECRET = new Set(['oauthClientId', 'email', 'syncToken', 'syncRepo', 'licenceKey'])
 
 /** What makes two copies of a record the same record. */
 function recordKey(x: unknown): string {

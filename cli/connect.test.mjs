@@ -125,6 +125,30 @@ test('the name they typed is used, under their login', () => {
 	assert.ok(p.onGitHub('newperson/my-learning'))
 })
 
+test('a second computer: connect names where the skills are and leaves ~/.claude alone, restore brings them, and lessons reach both ways', () => {
+	const p = newPerson()
+	assert.equal(p.cli('connect').status, 0)
+	assert.equal(p.cli('add', 'learning', 'Written on the first computer #two').status, 0)
+	const claude = join(p.root, 'second-claude')
+	mkdirSync(claude)
+	const env = { ...p.env, CLAUDE_HOME: claude, WP_BRAIN_CONFIG: join(p.root, 'second', 'brain.json'), WP_BRAIN_CLONE: join(p.root, 'second', 'clone'), WP_BRAIN_DB: join(p.root, 'second', 'brain.db'), WP_BRAIN_SESSIONS: join(p.root, 'second', 'sessions') }
+	const two = (...args) => {
+		const r = spawnSync('node', [CLI, ...args], { encoding: 'utf8', env })
+		return { status: r.status, out: r.stdout, err: r.stderr }
+	}
+	const r = two('connect', '--device', 'cli-two')
+	assert.equal(r.status, 0, r.err)
+	assert.match(r.out, /your repository holds them from .*wp-brain config restore/)
+	assert.ok(!existsSync(join(claude, 'skills')), 'connect writes nothing to ~/.claude')
+
+	assert.equal(two('config', 'restore').status, 0)
+	assert.ok(existsSync(join(claude, 'skills', 'my-skill', 'SKILL.md')))
+	assert.match(two('search', 'first computer').out, /Written on the first computer/)
+
+	assert.equal(two('add', 'learning', 'Written on the second computer #two').status, 0)
+	assert.match(p.cli('search', 'second computer').out, /Written on the second computer/)
+})
+
 test('lessons only stores no skills and leaves the library off', () => {
 	const p = newPerson()
 	const r = p.cli('connect', '--use', 'brain')

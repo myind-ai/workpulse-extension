@@ -363,6 +363,15 @@ export interface Filter {
 	project?: string
 }
 
+/** Whether two project names mean one repository: `owner/repo` and the bare `repo` do, whatever the case. Two different owners do not, nor does a longer name. */
+export function sameProject(a?: string, b?: string): boolean {
+	const x = a?.trim().toLowerCase()
+	const y = b?.trim().toLowerCase()
+	if (!x || !y) return false
+	if (x === y) return true
+	return (!x.includes('/') || !y.includes('/')) && x.split('/').pop() === y.split('/').pop()
+}
+
 export function filter(entries: BridgeEntry[], f: Filter): BridgeEntry[] {
 	const q = f.query?.trim().toLowerCase()
 	return entries.filter(
@@ -370,7 +379,7 @@ export function filter(entries: BridgeEntry[], f: Filter): BridgeEntry[] {
 			(!f.kind || f.kind === 'all' || e.kind === f.kind) &&
 			(!f.scope || f.scope === 'all' || e.scope === f.scope) &&
 			(!f.ticket || e.ticket === f.ticket) &&
-			(!f.project || e.project === f.project) &&
+			(!f.project || sameProject(e.project, f.project)) &&
 			(!q || [e.title, e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, ...(e.tags ?? [])].some((s) => s?.toLowerCase().includes(q))),
 	)
 }

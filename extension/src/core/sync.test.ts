@@ -23,7 +23,8 @@ const backup = (patch: Partial<Backup> = {}): Backup => ({
 
 describe('what never leaves this machine', () => {
 	it('should strip the token, the client id and the email', () => {
-		const out = safeSettings({ ...DEFAULT_SETTINGS, email: 'me@example.com', oauthClientId: 'abc123' })
+		const out = safeSettings({ ...DEFAULT_SETTINGS, email: 'me@example.com', oauthClientId: 'abc123', licenceKey: 'WP-PAID-KEY' })
+		expect(JSON.stringify(out)).not.toContain('WP-PAID-KEY')
 		expect(out.email).toBeUndefined()
 		expect(out.oauthClientId).toBeUndefined()
 		expect(JSON.stringify(out)).not.toContain('abc123')

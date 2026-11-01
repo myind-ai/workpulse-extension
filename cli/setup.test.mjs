@@ -288,3 +288,12 @@ test('doctor says when the learning is public, shares a repository, or a file st
 	writeFileSync(join(claude, 'CLAUDE.md'), 'branch brain of me/code-notes\n')
 	assert.equal(repoRows({ cfg: { ...moved, repo: 'me/code-notes' }, heads: 'a\trefs/heads/brain', visibility: 'private', claude }).at(-1).ok, true, 'a name that only starts with the old one')
 })
+
+test('doctor: a browser backup counts as the extension being seen, with or without an entry from the Brain page', () => {
+	const b = brainSandbox()
+	assert.equal(b.run('add', 'learning', 'One entry so doctor reads on', '--no-push').status, 0)
+	assert.match(b.run('doctor').out, /! Extension seen\s+no browser has written yet/)
+	mkdirSync(join(b.clone, 'workpulse'))
+	writeFileSync(join(b.clone, 'workpulse', 'index.json'), JSON.stringify({ version: 2, exportedAt: Date.UTC(2026, 10, 1) }))
+	assert.match(b.run('doctor').out, /✓ Extension seen\s+backed up 2026-11-01; nothing added from the Brain page yet/)
+})

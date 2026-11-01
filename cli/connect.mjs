@@ -2,7 +2,7 @@
 // and does the rest. It writes only ~/.config/workpulse and ~/.workpulse, so Claude may run it: hooks come from the plugin.
 // Reused: init (wp-brain.mjs) for the repository and clone, config backup for the skills, makeMemoryDb and writeMemoryFlag for session memory.
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -68,7 +68,10 @@ export async function connect({ opt, config, init, backupSkills, defaultName, to
 		if (flagged.length) cfg.configSkip = [...new Set([...(cfg.configSkip ?? []), ...flagged])]
 		writeFileSync(config, JSON.stringify(cfg, null, 2) + '\n')
 		if (stored) backupSkills()
-		said.push(stored ? `Skills and rules: ${stored} files stored. Run wp-brain config backup to store later changes; a new computer gets them with wp-brain config restore.` : 'Skills and rules: none on this computer yet.')
+		// Restoring writes to ~/.claude, which this command never does, so it is named and left to the person.
+		const configs = join(cfg.clone ?? clone, 'bridge', 'config')
+		const elsewhere = existsSync(configs) ? readdirSync(configs).filter((d) => d !== cfg.device) : []
+		said.push(stored ? `Skills and rules: ${stored} files stored. Run wp-brain config backup to store later changes; a new computer gets them with wp-brain config restore.` : elsewhere.length ? `Skills and rules: none on this computer yet, and your repository holds them from ${elsewhere.join(', ')}. Bring them here (a file already here is kept): wp-brain config restore` : 'Skills and rules: none on this computer yet.')
 		if (flagged.length) said.push(`Left out because they look like they hold a secret (${flagged.length}), so check them:\n${flagged.slice(0, 20).map((f) => `  ${f}`).join('\n')}${flagged.length > 20 ? `\n  …and ${flagged.length - 20} more` : ''}`)
 	}
 

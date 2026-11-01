@@ -298,7 +298,7 @@ test('with room to spare every section shows, in the order inbox, ticket, follow
 	inboxFile(sb, 'r1', 'Check the retry')
 	const r = sb.runWith({ input: JSON.stringify({ session_id: 'x', cwd: repo }) }, 'hook')
 	const text = hookJson(r)
-	const order = [/Inbox/, /## PAY-5/, /Open follow-ups/, /keep coming back/, /Learned before/, /acme\/payments-web: last/].map((re) => text.search(re))
+	const order = [/Inbox/, /## PAY-5/, /Open follow-ups/, /acme\/payments-web: last/, /Learned before/, /keep coming back/].map((re) => text.search(re))
 	assert.ok(order.every((n) => n >= 0), `a section is missing: ${order}\n${text}`)
 	assert.deepEqual([...order].sort((a, b) => a - b), order)
 	assert.doesNotMatch(text, /more: wp-brain brief/)

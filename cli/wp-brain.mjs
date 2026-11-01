@@ -116,7 +116,7 @@ const bridge = await import(join(here, '..', 'extension', 'src', 'core', 'bridge
 	console.error(`wp-brain needs Node 22.18 or newer (it loads the extension's TypeScript directly).\n${e.message}`)
 	process.exit(1)
 })
-const { EDITABLE, KINDS, ROOT, SOURCE_TYPES, sourceOf, appendLine, duplicateOf, entriesPath, entryByRef, filter, fold, newEntry, reportMarkdown, secretsIn, shortId, summarise } = bridge
+const { EDITABLE, KINDS, ROOT, SOURCE_TYPES, sourceOf, appendLine, duplicateOf, entriesPath, entryByRef, filter, fold, newEntry, reportMarkdown, sameProject, secretsIn, shortId, summarise } = bridge
 const { brainGraph, brainIndex, brainRecord } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-index.ts'))
 const { findNodesHow, narrowGraph } = await import(join(here, '..', 'extension', 'src', 'core', 'brain-graph.ts'))
 const { connectionGraph, connectionLines, nodeLine, overviewLines } = await import(join(here, 'graph.mjs'))
@@ -1944,12 +1944,19 @@ function forgetRuleMarks(session) {
 	}
 }
 
+/** Whether an entry belongs to a project: under any name of it (owner/repo or the repo alone), or of a repository `sameProjects` in the config joins to it. */
+function inProject(cfg, project) {
+	const joined = Array.isArray(cfg.sameProjects) ? cfg.sameProjects.filter((g) => Array.isArray(g) && g.some((n) => sameProject(n, project))).flat() : []
+	const names = [project, ...joined]
+	return (e) => names.some((n) => sameProject(e.project, n))
+}
+
 /** The SessionStart brief for a branch, within 400 tokens (`full`: all of it), or null when there is nothing recorded to say. */
 function sessionBrief(cfg, { branch, key, remote }, { full = false } = {}) {
 	const all = readAll(cfg)
-	// Entries name a project either as owner/repo or by the repo alone.
-	const project = [remote, remote?.split('/')[1]].find((p) => p && all.some((e) => e.project === p)) ?? remote
-	const known = all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || (project && e.project === project))
+	const project = remote
+	const mine = inProject(cfg, project)
+	const known = all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || mine(e))
 	// The branch's own words (fix/pay-2433-retry-webhook → retry webhook) find
 	// what was learned before on the same subject under other tickets.
 	const about = branch.replace(/^[^/]*\//, '').replace(/\b[a-z]{2,10}-\d{1,6}\b/i, '').replace(/[-_/]+/g, ' ').trim()
@@ -1986,7 +1993,8 @@ function sessionContext(given) {
 
 /**
  * The brief as sections, in the order they matter (the cap drops from the end): the inbox, the ticket's own entries,
- * open follow-ups, mistakes that keep coming back, what was learned before, the project's last entries.
+ * this repository's open follow-ups and last entries, what was written in the browser, what was learned before, mistakes that keep coming back.
+ * The repository's own come before the rest: other projects' lines once filled the whole cap, so a session never saw its own notes.
  * Each section is an array of units: a heading with its first item, then one unit per entry (with its detail lines).
  */
 function briefSections(cfg, all, key, project, about = '') {
@@ -2003,8 +2011,22 @@ function briefSections(cfg, all, key, project, about = '') {
 		if (related.size) items.push(`Related: ${[...related].join(', ')}`)
 		out.push(section(`## ${key}: ${mine.length ? mine.length + ' earlier entries' : 'nothing recorded yet'}`, items.length ? items : ['(none)']))
 	}
-	const open = all.filter((e) => e.next?.length && e.status !== 'done' && e.at > Date.now() - 14 * DAY).slice(0, 6)
+	const inThis = inProject(cfg, project)
+	const ours = (e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || inThis(e)
+	const open = all.filter((e) => e.next?.length && e.status !== 'done' && e.at > Date.now() - 14 * DAY && (!(key || project) || ours(e) || (!e.ticket && !e.project))).slice(0, 6)
 	out.push(section('## Open follow-ups (14 days)', open.map((e) => `- ${e.ticket ?? e.project ?? ''} ${e.next.join(' · ')}`)))
+	const p = all.filter(inThis).slice(0, 6)
+	out.push(section(`## ${project}: last ${p.length}`, p.map((e) => `- ${short(e)}`)))
+	// Learned before on the same subject, from other tickets and projects.
+	const shown = new Set(all.filter(ours).map((e) => e.id))
+	const learned = about.split(/\s+/).filter((w) => w.length > 2).length
+		? searchBrain(all.filter((e) => ['learning', 'mistake', 'debug', 'decision'].includes(e.kind) && !shown.has(e.id)), about).slice(0, 5)
+		: []
+	// Written in the browser: these name no project, and without a ticket or the branch's words nothing else would show them.
+	const told = new Set(learned.map(({ e }) => e.id))
+	const browser = all.filter((e) => e.device === 'extension-learnings' && e.at > Date.now() - 14 * DAY && !shown.has(e.id) && !told.has(e.id)).slice(0, 5)
+	out.push(section('## Written in the browser (14 days)', browser.map((e) => `- ${short(e)}`)))
+	out.push(section(`## Learned before about "${about}"`, learned.map(({ e }) => `- ${short(e)}${e.rootCause ? ` (root cause: ${e.rootCause})` : ''}`)))
 	const recent = all.filter((e) => e.at > Date.now() - 30 * DAY)
 	const { repeats } = summarise(recent)
 	out.push(
@@ -2016,14 +2038,6 @@ function briefSections(cfg, all, key, project, about = '') {
 			}),
 		),
 	)
-	// Learned before on the same subject, from other tickets and projects.
-	const shown = new Set(all.filter((e) => (key && (e.ticket === key || e.links?.related?.includes(key))) || (project && e.project === project)).map((e) => e.id))
-	const learned = about.split(/\s+/).filter((w) => w.length > 2).length
-		? searchBrain(all.filter((e) => ['learning', 'mistake', 'debug', 'decision'].includes(e.kind) && !shown.has(e.id)), about).slice(0, 5)
-		: []
-	out.push(section(`## Learned before about "${about}"`, learned.map(({ e }) => `- ${short(e)}${e.rootCause ? ` (root cause: ${e.rootCause})` : ''}`)))
-	const p = project ? all.filter((e) => e.project === project).slice(0, 10) : []
-	out.push(section(`## ${project}: last ${p.length}`, p.map((e) => `- ${short(e)}`)))
 	const kept = out.filter((s) => s.length)
 	kept.inbox = asks.length > 0 || !!saved // the first section is the inbox and the count, and capBrief never drops it
 	return kept

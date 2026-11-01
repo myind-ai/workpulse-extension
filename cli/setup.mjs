@@ -572,7 +572,15 @@ export async function doctor({ CONFIG, cliPath, readAll, dbLine }) {
 			const exts = Object.keys(byDevice).filter((d) => d.startsWith('ext-'))
 			const day = (t) => new Date(t).toISOString().slice(0, 10)
 			check(all.length > 0, 'Entries', `${all.length} (${Object.keys(byDevice).length} writers)`, false)
-			check(exts.length > 0, 'Extension seen', exts.length ? exts.map((d) => `${d} ${day(byDevice[d])}`).join(', ') : 'no browser has written yet — Brain page → + Add, or check Settings → Backup', false)
+			// A backup proves the browser is linked as well as an entry does: the entries only come from Brain page → + Add, which nobody has to use.
+			const backedUp = (() => {
+				try {
+					return JSON.parse(readFileSync(join(cfg.clone, cfg.backupDir || 'workpulse', 'index.json'), 'utf8')).exportedAt
+				} catch {
+					return null
+				}
+			})()
+			check(exts.length > 0 || !!backedUp, 'Extension seen', exts.length ? exts.map((d) => `${d} ${day(byDevice[d])}`).join(', ') : backedUp ? `backed up ${day(backedUp)}; nothing added from the Brain page yet, which is fine` : 'no browser has written yet — Brain page → + Add, or check Settings → Backup', false)
 			const folders = listLibrary(cfg.clone, () => '').length
 			check(true, 'Library', cfg.library === true ? `on — ${folders} learning folder${folders === 1 ? '' : 's'} in bridge/library` : `off — notes, transcripts, skills and rules stay on this machine (setup → question 8, or "library": true in brain.json)`, false)
 			const backup = backupState(git, cfg)
