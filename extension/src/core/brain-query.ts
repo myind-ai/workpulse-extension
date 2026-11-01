@@ -1,13 +1,13 @@
 // Search filters for the Brain, and which entries belong to the page you are on.
 //
 //   ticket:PAY-2433  type:debug  status:open  repo:payments  tag:retry  #retry
-//   after:2026-10-01  before:7d  has:next-action  has:pr  has:root-cause  scope:personal
+//   after:2026-10-01  before:7d  has:next-action  has:pr  has:root-cause  scope:personal  source:youtube
 //
 // Whatever is not a filter is the words, searched as before. One parser for the
 // CLI (`wp-brain search`), the one search and the Brain page, so a query means
-// the same thing everywhere. Only type imports, so Node loads this directly.
+// the same thing everywhere. Its one import is bridge.ts, so Node loads this directly.
 
-import type { BridgeEntry } from './bridge'
+import { libraryKey, shortId, sourceOf, type BridgeEntry } from './bridge.ts'
 
 export interface BrainFilters {
 	ticket?: string
@@ -19,7 +19,14 @@ export interface BrainFilters {
 	before?: number
 	has: string[]
 	scope?: string
+	source?: string
+	id?: string
+	library?: string
 }
+
+/** The text under the Brain search box, shown where the filters are typed. */
+export const BRAIN_FILTER_HELP =
+	'Filters: ticket: type: status:open|done repo: tag: (or #tag) after: before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:work|personal source:youtube|instagram|site|none id: library:<type/folder>'
 
 export interface BrainQuery {
 	/** What is left once the filters are taken out. */
@@ -71,6 +78,9 @@ export function parseBrainQuery(query: string, now = Date.now()): BrainQuery {
 		else if (key === 'tag') filters.tags.push(lower.replace(/^#/, ''))
 		else if (key === 'has') filters.has.push(HAS_ALIAS[lower] ?? lower)
 		else if (key === 'scope') filters.scope = lower
+		else if (key === 'source' || key === 'from') filters.source = lower
+		else if (key === 'id') filters.id = value.toLowerCase()
+		else if (key === 'library') filters.library = libraryKey(value).toLowerCase()
 		else if (key === 'after' || key === 'since') used = (filters.after = whenOf(value, now)) !== undefined
 		else if (key === 'before' || key === 'until') used = (filters.before = whenOf(value, now)) !== undefined
 		else used = false
@@ -85,6 +95,12 @@ export function matchBrain(e: BridgeEntry, f: BrainFilters): boolean {
 	if (f.ticket && e.ticket?.toUpperCase() !== f.ticket && !e.links?.related?.some((k) => k.toUpperCase() === f.ticket)) return false
 	if (f.type && e.kind !== f.type) return false
 	if (f.scope && e.scope !== f.scope) return false
+	if (f.source && (f.source === 'none' ? sourceOf(e) !== undefined : sourceOf(e)?.type !== f.source)) return false
+	if (f.id && e.id.toLowerCase() !== f.id && shortId(e.id).toLowerCase() !== f.id) return false
+	if (f.library) {
+		const lib = sourceOf(e)?.library
+		if (!lib || libraryKey(lib).toLowerCase() !== f.library) return false
+	}
 	if (f.status) {
 		const done = e.status?.toLowerCase() === 'done'
 		if (f.status === 'open' ? done : f.status === 'done' ? !done : !e.status?.toLowerCase().includes(f.status)) return false
@@ -111,13 +127,13 @@ export function matchBrain(e: BridgeEntry, f: BrainFilters): boolean {
 export function describeFilters(f: BrainFilters): string[] {
 	const day = (t: number) => new Date(t).toISOString().slice(0, 10)
 	return [
-		f.ticket && `ticket ${f.ticket}`, f.type && `type ${f.type}`, f.status && `status ${f.status}`, f.project && `repo ${f.project}`, f.scope && `scope ${f.scope}`,
+		f.ticket && `ticket ${f.ticket}`, f.type && `type ${f.type}`, f.status && `status ${f.status}`, f.project && `repo ${f.project}`, f.scope && `scope ${f.scope}`, f.source && `source ${f.source}`, f.id && `id ${f.id}`, f.library && `library ${f.library}`,
 		...f.tags.map((t) => `#${t}`), f.after !== undefined && `after ${day(f.after)}`, f.before !== undefined && `before ${day(f.before)}`, ...f.has.map((h) => `has ${h}`),
 	].filter((x): x is string => !!x)
 }
 
 /** Words that say nothing about the subject: they matched almost every entry and pushed the real ones down. */
-const FILLER = new Set(
+export const FILLER = new Set(
 	`a an and are as at be but by can could did do does for from get got had has have he her him his how i if in into is it its
 	just let like make me more most my no not now of on or our out please so some than that the their them then there these they
 	this to too up us use was we were what when where which who why will with would yes you your all any also been both each
@@ -136,6 +152,9 @@ export function stem(w: string): string {
 	// promise / promised / promising all end as "promis"
 	return s.length > 4 && s.endsWith('e') ? s.slice(0, -1) : s
 }
+
+/** Weight of a word found in a title, used by `searchBrain` and `rankTitles` alike. */
+const TITLE_WEIGHT = 8
 
 const terms = (text?: string) => [...new Set(String(text ?? '').toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}/g) ?? [])]
 
@@ -160,10 +179,10 @@ export function searchBrain(entries: BridgeEntry[], query: string, now = Date.no
 			const title = keys(e.title)
 			const subtitle = keys(e.subtitle)
 			const tags = keys((e.tags ?? []).join(' '))
-			const rest = keys([e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, ...(e.next ?? [])].filter(Boolean).join(' '))
+			const rest = keys([e.body, e.ticket, e.project, e.rootCause, e.asked, e.done, e.source?.title, e.source?.by, ...(e.next ?? [])].filter(Boolean).join(' '))
 			let matched = 0
 			const raw = wanted.reduce((n, w) => {
-				const s = (title.includes(w) ? 8 : 0) + (subtitle.includes(w) ? 5 : 0) + (tags.includes(w) ? 5 : 0) + (rest.includes(w) ? 2 : 0)
+				const s = (title.includes(w) ? TITLE_WEIGHT : 0) + (subtitle.includes(w) ? 5 : 0) + (tags.includes(w) ? 5 : 0) + (rest.includes(w) ? 2 : 0)
 				if (s) matched++
 				return n + s
 			}, 0)
@@ -172,6 +191,21 @@ export function searchBrain(entries: BridgeEntry[], query: string, now = Date.no
 		})
 		.filter((x) => x.score > 0)
 		.sort((a, b) => b.score - a.score || b.e.at - a.e.at)
+}
+
+/** Items whose title carries the words of the query, best first (ties keep their order); none for an empty query. */
+export function rankTitles<T>(items: T[], query: string, title: (t: T) => string): T[] {
+	const wanted = keys(query)
+	if (!wanted.length) return []
+	return items
+		.map((item, i) => {
+			const have = keys(title(item))
+			const hits = wanted.filter((w) => have.includes(w)).length
+			return { item, i, score: hits * TITLE_WEIGHT * hits }
+		})
+		.filter((x) => x.score > 0)
+		.sort((a, b) => b.score - a.score || a.i - b.i)
+		.map((x) => x.item)
 }
 
 /** What recall looks at: lessons, not ticket logs or time entries. */
@@ -259,4 +293,34 @@ export function relatedTo(entries: BridgeEntry[], page: { url: string; title?: s
 	}
 	got.sort((a, b) => rank[a.why] - rank[b.why] || b.e.at - a.e.at)
 	return { keys, repo: repo?.includes('/') ? repo : undefined, entries: got.slice(0, limit) }
+}
+
+// ── links into the Brain page ───────────────────────────────────────────────
+
+type BrainTarget = { ticket?: string; project?: string; query?: string; entry?: string }
+
+/** `#/brain/KEY`, `#/brain/project=…`, `#/brain/q=…`, `#/brain/entry=…`; values are encoded so a `/` never splits the route. */
+export function brainHash(to: BrainTarget): string {
+	const enc = encodeURIComponent
+	if (to.ticket) return `#/brain/${enc(to.ticket)}`
+	if (to.project) return `#/brain/project=${enc(to.project)}`
+	if (to.query) return `#/brain/q=${enc(to.query)}`
+	if (to.entry) return `#/brain/entry=${enc(to.entry)}`
+	return '#/brain'
+}
+
+/** The inverse of `brainHash` for the last segment of the route; a bare value is a ticket, as every older link was. */
+export function brainArg(arg?: string): BrainTarget {
+	if (!arg) return {}
+	const dec = (v: string) => {
+		try {
+			return decodeURIComponent(v)
+		} catch {
+			return v
+		}
+	}
+	const m = arg.match(/^(project|q|entry)=(.*)$/)
+	if (!m) return { ticket: dec(arg) }
+	const v = dec(m[2])
+	return m[1] === 'project' ? { project: v } : m[1] === 'q' ? { query: v } : { entry: v }
 }

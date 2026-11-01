@@ -74,3 +74,58 @@
 /* Brain: entries on the left, tickets and projects on the right; one column when narrow. */
 .wp-brain { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
 @media (max-width: 900px) { .wp-brain { grid-template-columns: minmax(0, 1fr); } }
+
+/* A source chip that links out reads as a link on hover, and never shouts. */
+.wp-chip-source { text-decoration: none; }
+a.wp-chip-source:hover { color: var(--wp-accent); }
+
+/* Library: a text too large to parse is shown as plain text, wrapped, and scrolls inside its box. */
+.wp-lib-pre { margin: 0; max-height: 70vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--wp-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; }
+
+/* Graph. Node colours by type, one validated categorical order per theme (light and dark pass the palette check);
+   five types is past what colour alone can carry, so each also has its own shape and a labelled legend. */
+.wp-root { --wp-node-lesson: #2a78d6; --wp-node-source: #eb6834; --wp-node-project: #1baf7a; --wp-node-ticket: #eda100; --wp-node-tag: #e87ba4; }
+@media (prefers-color-scheme: dark) {
+	.wp-root { --wp-node-lesson: #3987e5; --wp-node-source: #d95926; --wp-node-project: #199e70; --wp-node-ticket: #c98500; --wp-node-tag: #d55181; }
+}
+/* The one page that needs the width: a graph in the reading column would be a postage stamp. */
+.wp-main:has(.wp-graph-page) { max-width: 1480px; }
+.wp-graph-page .wp-brain { grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 900px) { .wp-graph-page .wp-brain { grid-template-columns: minmax(0, 1fr); } }
+.wp-graph-frame { position: relative; border: 1px solid var(--wp-border); border-radius: var(--wp-radius); background: var(--wp-surface); overflow: hidden; }
+.wp-graph-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 4px; }
+.wp-graph-svg { display: block; width: 100%; height: max(440px, calc(100vh - 345px)); cursor: grab; touch-action: none; user-select: none; --ts: 1; --ns: 1; }
+.wp-graph-page:has(> .wp-banner) .wp-graph-svg { height: max(440px, calc(100vh - 400px)); }
+.wp-graph-svg:active { cursor: grabbing; }
+[data-type='lesson'] { --wp-g: var(--wp-node-lesson); }
+[data-type='source'] { --wp-g: var(--wp-node-source); }
+[data-type='project'] { --wp-g: var(--wp-node-project); }
+[data-type='ticket'] { --wp-g: var(--wp-node-ticket); }
+[data-type='tag'] { --wp-g: var(--wp-node-tag); }
+.wp-g-swatch { flex: none; vertical-align: -1px; }
+.wp-g-swatch path { fill: var(--wp-g); }
+button[aria-pressed='false'] .wp-g-swatch { opacity: 0.35; }
+.wp-g-sample { vertical-align: 1px; }
+.wp-g-sample line { stroke: var(--wp-muted); stroke-width: 1.5; }
+.wp-g-sample line[data-kind='related'] { stroke-dasharray: 3 2; }
+.wp-g-edge { stroke: var(--wp-muted); stroke-opacity: 0.45; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.wp-g-edge[data-kind='related'] { stroke-dasharray: 4 3; }
+.wp-g-edge.is-lit { stroke: var(--wp-muted); stroke-opacity: 1; stroke-width: 1.5; }
+.wp-g-node { cursor: pointer; }
+.wp-g-hit { fill: transparent; pointer-events: all; transform: scale(var(--ns)); }
+.wp-g-mark { fill: var(--wp-g); stroke: var(--wp-surface); stroke-width: 1; vector-effect: non-scaling-stroke; transform: scale(var(--ns)); }
+.wp-g-ring { fill: none; stroke: var(--wp-danger); stroke-width: 1.5; vector-effect: non-scaling-stroke; transform: scale(var(--ns)); }
+.is-archived .wp-g-mark { fill: var(--wp-surface); stroke: var(--wp-g); stroke-width: 2; }
+.wp-g-label { display: none; pointer-events: none; font-size: 11px; font-weight: 500; fill: var(--wp-text); text-anchor: middle; paint-order: stroke; stroke: var(--wp-surface); stroke-width: 3px; stroke-linejoin: round; transform: translateY(calc(var(--r) * var(--ns) * 1px)) scale(var(--ts)); }
+.is-hub .wp-g-label, .is-zoomed .wp-g-label { display: block; }
+.is-hub.is-crowded .wp-g-label { display: none; }
+.is-sel .wp-g-label, .is-sel.is-crowded .wp-g-label, .is-near .wp-g-label, .is-near.is-crowded .wp-g-label { display: block; }
+[data-side='right'] .wp-g-label { text-anchor: start; transform: translateX(calc(var(--r) * var(--ns) * 1px)) scale(var(--ts)) translate(5px, -8px); }
+[data-side='left'] .wp-g-label { text-anchor: end; transform: translateX(calc(var(--r) * var(--ns) * -1px)) scale(var(--ts)) translate(-5px, -8px); }
+.has-sel .wp-g-node:not(.is-sel, .is-near) { opacity: 0.32; }
+.has-sel .wp-g-edge:not(.is-lit) { stroke-opacity: 0.18; }
+.is-sel .wp-g-mark { stroke: var(--wp-text); stroke-width: 2; }
+.is-sel .wp-g-label { font-weight: 650; }
+.wp-graph-row { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; }
+.wp-graph-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.wp-graph-title { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }

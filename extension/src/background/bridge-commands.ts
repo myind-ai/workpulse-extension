@@ -8,7 +8,8 @@
 // files whose sha moved are fetched. Writing is one commit to a file only this
 // browser writes, so nothing anybody else wrote can be overwritten.
 
-import { appendLine, brainOf, changedFiles, devicesOf, duplicateOf, EDITABLE, entriesPath, inboxPath, newEntry, secretsIn, shortId, summarise, type BridgeEntry, type Device, type EditableField, type InboxMessage, type Summary } from '@/core/bridge'
+import { ackFiles, appendLine, brainOf, cleanSaveUrl, changedFiles, devicesOf, duplicateOf, EDITABLE, entriesPath, inboxPath, LIBRARY_FILES, newEntry, secretsIn, shortId, sourceKey, sourceOf, summarise, type BridgeEntry, type Device, type EditableField, type InboxMessage, type SavedUrl, type Summary } from '@/core/bridge'
+import { applyMeta, libraryFromTree, type LibraryItem } from '@/core/library'
 import { brainRecord, openWork, type OpenWork } from '@/core/brain-index'
 import { relatedTo } from '@/core/brain-query'
 import { dueForCheck, readRelease, RELEASES_API, UPDATE_CMD, type Release, type UpdateState } from '@/core/update'
@@ -36,6 +37,8 @@ export interface BridgeView {
 	summary: Summary
 	/** Saved here, waiting for a repository or the network. */
 	queued: number
+	/** Pages sent with Save to Brain, newest first, and where the CLI is with each. */
+	saved: SavedUrl[]
 	/** Where to pick up: the newest next action per ticket, last 30 days. */
 	open: OpenWork[]
 	/** Archived entries: out of every list, search and brief, kept for Restore. */
@@ -44,6 +47,16 @@ export interface BridgeView {
 
 
 
+const isSave = (m: InboxMessage) => m.type === 'save-url'
+/** An ack file's fields, or null for one that is not an object: re-reading it would give the same answer. */
+const parseAck = (text: string): { state?: string; why?: unknown; by?: unknown } | null => {
+	try {
+		const a = JSON.parse(text) as unknown
+		return a && typeof a === 'object' ? a : null
+	} catch {
+		return null
+	}
+}
 const KEY = /\b([A-Z][A-Z0-9]{1,9})-(\d{1,6})\b/
 
 /** What the Save context sheet sends. */
@@ -63,6 +76,7 @@ export class BridgeCommands extends PageCommands {
 	private async importWorklogs(files: Record<string, string>, now: number): Promise<number> {
 		const rt = await this.store.runtime()
 		const seen = new Set(rt.bridge?.importedWorklogs ?? [])
+		const dismissed = new Set(rt.bridge?.dismissedWorklogs ?? [])
 		let added = 0
 		for (const [path, body] of Object.entries(files)) {
 			if (!/^bridge\/worklogs\/\d{4}-\d{2}\/.+\.jsonl$/.test(path)) continue
@@ -72,8 +86,10 @@ export class BridgeCommands extends PageCommands {
 					if (w.schema !== 'workpulse.worklog/1' || !w.id || !Number.isFinite(w.from) || !Number.isFinite(w.to) || w.to! <= w.from! || w.to! > now || typeof w.text !== 'string' || !w.text.trim()) continue
 					const minutes = Math.round((w.to! - w.from!) / 60_000)
 					if (minutes < 1 || minutes > 12 * 60) continue
+					// Deleted here on purpose: it stays deleted.
+					if (dismissed.has(w.id)) continue
 					// `seen` protects normal polling. The local row is the authority:
-					// after a restore/clear it may be absent while its bridge record is
+					// after a restore it may be absent while its bridge record is
 					// still valid, and Sync must bring it back.
 					const local = await this.store.entries(istDate(w.from!))
 					if (local.some((e) => e.bridgeWorklogId === w.id)) {
@@ -125,6 +141,7 @@ export class BridgeCommands extends PageCommands {
 			entries,
 			summary: summarise(entries),
 			queued: queue.length,
+			saved: rt.bridge?.saved ?? [],
 			open: openWork(entries, this.now() - 30 * 86_400_000),
 			archived: brainOf(rt, true).filter((e) => e.archived),
 		}
@@ -142,27 +159,124 @@ export class BridgeCommands extends PageCommands {
 		await this.flushQueue(gh).catch(() => undefined)
 		const rt = await this.store.runtime()
 		try {
-			const tree = await gh.treeIfChanged(force ? undefined : rt.bridge?.etag)
+			// A library that was never read (an upgrade from before it existed) needs the
+			// whole tree once, whatever ETag is stored, or a 304 would leave it empty.
+			const tree = await gh.treeIfChanged(force || rt.bridge?.library === undefined ? undefined : rt.bridge?.etag)
 			if (!tree) {
 				await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, polledAt: now, error: undefined }))
 				return { changed: 0, at: now }
 			}
-			const { fetch, shas } = changedFiles(rt.bridge?.shas ?? {}, tree.files)
+			const changes = changedFiles(rt.bridge?.shas ?? {}, tree.files)
+			const { fetch } = changes
+			// A tree GitHub cut short lacks files that are still there: keep what is known.
+			const shas = tree.truncated ? { ...(rt.bridge?.shas ?? {}), ...changes.shas } : changes.shas
 			const files = { ...(rt.bridge?.files ?? {}) }
+			const unread: string[] = []
 			for (const path of fetch) {
 				const got = await gh.read(path)
 				if (got) files[path] = got.text
+				else unread.push(path)
 			}
-			for (const path of Object.keys(files)) if (!(path in shas)) delete files[path]
-			await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, etag: tree.etag, shas, files, polledAt: now, error: undefined }))
+			if (!tree.truncated) for (const path of Object.keys(files)) if (!(path in shas)) delete files[path]
+			// Listed but not read: what is known stays, and its sha is not recorded, so a later poll reads it.
+			for (const path of unread) delete shas[path]
+			const acked = await this.readAcks(gh, rt.bridge?.saved ?? [], rt.bridge?.ackShas ?? {}, tree.files)
+			let library = libraryFromTree(tree.files, rt.bridge?.library)
+			if (tree.truncated) {
+				const seen = new Set(library.map((i) => i.path))
+				library = [...library, ...(rt.bridge?.library ?? []).filter((i) => !seen.has(i.path))].sort((a, b) => a.path.localeCompare(b.path))
+			}
+			const libraryChanged = JSON.stringify(library) !== JSON.stringify(rt.bridge?.library)
+			await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, etag: acked.failed || unread.length ? undefined : tree.etag, shas, files, library, truncated: tree.truncated, polledAt: now, error: undefined, saved: (r.bridge?.saved ?? []).map((x) => acked.saved.find((y) => y.id === x.id) ?? x), ackShas: acked.ackShas }))
 			const imported = await this.importWorklogs(files, now)
-			if (fetch.length || imported) this.env.ui.changed()
+			if (fetch.length || imported || libraryChanged || acked.moved) this.env.ui.changed()
 			return { changed: fetch.length + imported, at: now }
 		} catch (e) {
 			const error = (e as Error).message
 			await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, polledAt: now, error }))
 			throw e
 		}
+	}
+
+	/**
+	 * Where the CLI is with each page sent from here. Acks change state under the
+	 * same path (claimed, then done or failed), so a file is read once per blob
+	 * sha, from the tree's own paths and shas. Only acks for rows this browser
+	 * holds are read. A network failure or a missing blob is tried again next
+	 * poll; a file that is not valid is recorded and left, so it costs one read.
+	 */
+	private async readAcks(gh: GitHub, saved: SavedUrl[], seen: Record<string, string>, tree: { path: string; sha: string }[]): Promise<{ saved: SavedUrl[]; ackShas: Record<string, string>; moved: boolean; failed: boolean }> {
+		const rows = saved.map((s) => ({ ...s }))
+		const ackShas = { ...seen }
+		let moved = false
+		let failed = false
+		for (const f of ackFiles(tree)) {
+			const row = rows.find((s) => s.id === f.id)
+			if (!row || ackShas[f.path] === f.sha) continue
+			try {
+				const text = await gh.readBlob(f.sha)
+				if (text === null) {
+					failed = true
+					continue
+				}
+				// Read, whatever it holds: this sha is not read again. A new one from its writer is.
+				ackShas[f.path] = f.sha
+				const a = parseAck(text)
+				if (!a) continue
+				row.state = a.state === 'claimed' || a.state === 'failed' || a.state === 'done' ? a.state : 'done'
+				row.why = row.state === 'failed' && typeof a.why === 'string' ? a.why.slice(0, 300) : undefined
+				row.by = typeof a.by === 'string' ? a.by.slice(0, 60) : row.by
+				moved = true
+			} catch {
+				// Not readable now. The tree's ETag is dropped by the caller, so the next poll looks again instead of answering 304.
+				failed = true
+			}
+		}
+		return { saved: rows, ackShas, moved, failed }
+	}
+
+	/**
+	 * The saved library, from the last poll. Meta for folders not read yet is
+	 * fetched here, at most 30 a call, so a first open of a large library
+	 * fills in over a few calls rather than all at once.
+	 */
+	async bridgeLibrary(): Promise<{ ready: boolean; items: LibraryItem[]; truncated: boolean }> {
+		const gh = await this.bridgeGithub()
+		if (!gh) return { ready: false, items: [], truncated: false }
+		const rt = await this.store.runtime()
+		const missing = (rt.bridge?.library ?? []).filter((i) => i.files.some((f) => f.name === 'meta.json' && f.sha !== i.metaSha)).slice(0, 30)
+		const read = new Map<string, LibraryItem>()
+		for (const item of missing) {
+			const sha = item.files.find((f) => f.name === 'meta.json')!.sha
+			try {
+				const raw = await gh.readBlob(sha)
+				if (raw !== null) read.set(item.path, applyMeta(item, raw, sha))
+			} catch {
+				// Try again on the next call; one unreadable meta must not hide the rest.
+			}
+		}
+		if (read.size) {
+			await this.store.updateRuntime((r) => {
+				if (!r.bridge?.library) return
+				r.bridge = { ...r.bridge, library: r.bridge.library.map((i) => (read.has(i.path) && read.get(i.path)!.metaSha === i.files.find((f) => f.name === 'meta.json')?.sha ? read.get(i.path)! : i)) }
+			})
+		}
+		const now = (await this.store.runtime()).bridge
+		return { ready: true, items: now?.library ?? [], truncated: !!now?.truncated }
+	}
+
+	/** One file of one library folder, by its blob (so a file over 1 MB opens too). Only what the poll listed. */
+	async bridgeLibraryFile(path: string, name: string): Promise<{ text: string; sha: string }> {
+		const item = (await this.store.runtime()).bridge?.library?.find((i) => i.path === path)
+		if (!item) throw new Error('That library folder is not here. Sync, then try again.')
+		if (!(LIBRARY_FILES as readonly string[]).includes(name)) throw new Error('That file is not part of the library.')
+		const file = item.files.find((f) => f.name === name)
+		if (!file) throw new Error('That file is not in this folder.')
+		const gh = await this.bridgeGithub()
+		if (!gh) throw new Error('Set up the backup first: a repository and a token, in Settings → Backup.')
+		const text = await gh.readBlob(file.sha)
+		if (text === null) throw new Error('GitHub no longer has that file. Sync, then try again.')
+		return { text, sha: file.sha }
 	}
 
 	/**
@@ -350,16 +464,45 @@ export class BridgeCommands extends PageCommands {
 		await this.send(gh, [entry])
 	}
 
-	/** Ask whatever reads the inbox — the CLI skill — to do something. */
-	async bridgeAsk(text: string, ticket?: string, project?: string): Promise<void> {
+	/** One message to the inbox, in one commit. Nothing with a secret shape goes; the error names the kind, never the value. */
+	private async sendInbox(fields: Omit<InboxMessage, 'schema' | 'id' | 'at' | 'from'>): Promise<InboxMessage> {
 		if (!enabled('BRIDGE_SYNC')) throw new Error('The bridge is switched off in this build (WXT_FEATURE_BRIDGE_SYNC).')
-		const found = secretsIn(text)
+		const found = secretsIn([fields.text, fields.url, fields.title].filter(Boolean).join('\n'))
 		if (found.length) throw new Error(`Not sent: it contains what looks like a ${found.join(', ')}.`)
 		const gh = await this.bridgeGithub()
 		if (!gh) throw new Error('Set up the backup first: a repository and a token, in Settings → Backup.')
-		const now = this.now()
-		const msg: InboxMessage = { schema: 'workpulse.bridge.msg/1', id: Math.random().toString(36).slice(2, 10), at: now, from: await this.device(), text: text.trim(), ticket, project }
-		await gh.commit([{ path: inboxPath(msg), content: `${JSON.stringify(msg, null, 2)}\n` }], `bridge: ask — ${msg.text.slice(0, 60)}`)
+		const msg: InboxMessage = { schema: 'workpulse.bridge.msg/1', id: Math.random().toString(36).slice(2, 10), at: this.now(), from: await this.device(), ...fields, text: fields.text.trim() }
+		await gh.commit([{ path: inboxPath(msg), content: `${JSON.stringify(msg, null, 2)}\n` }], `bridge: ${isSave(msg) ? 'save' : 'ask'} — ${msg.text.slice(0, 60)}`)
+		return msg
+	}
+
+	/** Ask whatever reads the inbox — the CLI skill — to do something. */
+	async bridgeAsk(text: string, ticket?: string, project?: string): Promise<void> {
+		await this.sendInbox({ text, ticket, project })
+	}
+
+	/**
+	 * Send a page's address and title to the inbox, for `wp-brain queue`. Only on the
+	 * person's click; nothing else from the page. Not kept here when it cannot be sent:
+	 * the person is told and can press again.
+	 */
+	async bridgeSaveUrl(rawUrl: string, rawTitle?: string): Promise<{ saved: SavedUrl; duplicate?: 'queue' | 'brain' }> {
+		const cleaned = cleanSaveUrl(rawUrl)
+		if ('error' in cleaned) throw new Error(cleaned.error)
+		const { url } = cleaned
+		const title = rawTitle?.trim() || undefined
+		const found = secretsIn([url, title ?? ''].join('\n'))
+		if (found.length) throw new Error(`Not sent: it contains what looks like a ${found.join(', ')}.`)
+		const key = sourceKey({ type: 'site', url })
+		const rt = await this.store.runtime()
+		const waiting = (rt.bridge?.saved ?? []).find((s) => (s.state === 'waiting' || s.state === 'claimed') && sourceKey({ type: 'site', url: s.url }) === key)
+		if (waiting) return { saved: waiting, duplicate: 'queue' }
+		if (brainOf(rt).some((e) => sourceOf(e)?.url && sourceKey(sourceOf(e)) === key)) return { saved: { id: '', url, title: title?.slice(0, 200), at: this.now(), state: 'done' }, duplicate: 'brain' }
+		const msg = await this.sendInbox({ text: `Save to Brain: ${url}`, type: 'save-url', url, title: title?.slice(0, 200) })
+		const saved: SavedUrl = { id: msg.id, url, ...(msg.title ? { title: msg.title } : {}), at: msg.at, state: 'waiting' }
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, saved: [saved, ...(r.bridge?.saved ?? [])].slice(0, 50), etag: undefined }))
+		this.env.ui.changed()
+		return { saved }
 	}
 }
 

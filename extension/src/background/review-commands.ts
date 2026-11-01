@@ -91,6 +91,7 @@ export class ReviewCommands extends DayCommands {
 
 	async deleteEntry(date: string, entryUid: string): Promise<void> {
 		const list = await this.store.entries(date)
+		await this.dismissWorklogs(list.filter((e) => e.uid === entryUid))
 		await this.store.setEntries(date, list.filter((e) => e.uid !== entryUid))
 		this.env.ui.changed()
 	}

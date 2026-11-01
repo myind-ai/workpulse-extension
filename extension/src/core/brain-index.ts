@@ -9,10 +9,10 @@
 // CLI writes them next to its clone (`wp-brain index`). Nothing here touches the
 // backup's own folder. Pure: no chrome, no fetch.
 
-import type { BridgeEntry } from './bridge'
-
-// bridge.ts's ROOT. Only types are imported from there, so the CLI can load this
+// Values may come from ./bridge.ts, written with the extension as brain-query.ts does, so the CLI can load this
 // file with Node's own type stripping, which does not resolve extensionless paths.
+import { SOURCE_LABEL, sourceKey, sourceLink, sourceOf, urlHost, type BridgeEntry } from './bridge.ts'
+
 const ROOT = 'bridge'
 
 const slug = (text: string) =>
@@ -83,10 +83,100 @@ export function openWork(entries: BridgeEntry[], since = 0): OpenWork[] {
 		.sort((a, b) => b.at - a.at)
 }
 
+export type GraphNodeType = 'lesson' | 'source' | 'project' | 'ticket' | 'tag'
+export type GraphEdgeKind = 'source' | 'project' | 'ticket' | 'related' | 'tag'
+
+export interface GraphNode {
+	/** A lesson keeps its entry id; hubs are `ticket:KEY`, `project:name`, `tag:name`, `source:<sourceKey>`. */
+	id: string
+	type: GraphNodeType
+	label: string
+	/** How many edges touch it. */
+	degree: number
+	/** Lessons: the entry kind and what the page shows beside it. Never body text. */
+	kind?: string
+	at?: number
+	scope?: string
+	status?: string
+	path?: string
+	/** Sources: the type, and a safe http(s) link when there is one. */
+	sourceType?: string
+	url?: string
+	archived?: boolean
+}
+
+/** `source` is always the lesson. */
+export interface GraphEdge {
+	source: string
+	target: string
+	kind: GraphEdgeKind
+}
+
+export interface BrainGraph {
+	version: 3
+	generatedAt: string
+	nodes: GraphNode[]
+	edges: GraphEdge[]
+}
+
 /**
- * The index and the graph, for reading: never committed. Edges join each entry
- * to the previous one on the same ticket, project or tag — a chain per group,
- * so it grows with the number of entries, not with its square.
+ * Every entry is a lesson node; ticket, project, tag and source are hubs they join. An edge goes from a lesson to a hub,
+ * so it grows with the number of entries, not with its square. Ticket keys are upper-cased, tags lower-cased, a project's
+ * id is lower-cased (its label as first written), and a source is one node per video or page whatever timestamp it carries.
+ * A node holds no body text.
+ */
+export function brainGraph(entries: BridgeEntry[], now = Date.now()): BrainGraph {
+	const lessons: GraphNode[] = []
+	const hubs = new Map<string, GraphNode>()
+	const edges: GraphEdge[] = []
+	const seen = new Set<string>()
+	const titled = new Set<string>()
+	const hub = (id: string, type: GraphNodeType, label: string, more: Partial<GraphNode> = {}) => {
+		let node = hubs.get(id)
+		if (!node) hubs.set(id, (node = { id, type, label, degree: 0, ...more }))
+		return node
+	}
+	const join = (lesson: GraphNode, target: GraphNode, kind: GraphEdgeKind) => {
+		const key = `${lesson.id}|${target.id}|${kind}`
+		if (seen.has(key)) return
+		seen.add(key)
+		edges.push({ source: lesson.id, target: target.id, kind })
+		lesson.degree++
+		target.degree++
+	}
+	// Oldest first, so a project's label and a source's title are the first written.
+	for (const e of [...entries].filter((x) => typeof x.amends !== 'string').sort((a, b) => a.at - b.at)) {
+		const lesson: GraphNode = { id: e.id, type: 'lesson', label: e.title, degree: 0, kind: e.kind, at: e.at, scope: e.scope, status: e.status, path: recordPath(e), ...(e.archived ? { archived: true } : {}) }
+		lessons.push(lesson)
+		const own = e.ticket?.trim().toUpperCase()
+		if (own) join(lesson, hub(`ticket:${own}`, 'ticket', own), 'ticket')
+		const project = e.project?.trim()
+		if (project) join(lesson, hub(`project:${project.toLowerCase()}`, 'project', project), 'project')
+		for (const t of e.tags ?? []) {
+			const tag = String(t).trim().replace(/^#/, '').toLowerCase()
+			if (tag) join(lesson, hub(`tag:${tag}`, 'tag', tag), 'tag')
+		}
+		for (const k of e.links?.related ?? []) {
+			const key = String(k).trim().toUpperCase()
+			if (key && key !== own) join(lesson, hub(`ticket:${key}`, 'ticket', key), 'related')
+		}
+		const s = sourceOf(e)
+		const sk = sourceKey(s)
+		if (s && sk) {
+			const id = `source:${sk}`
+			const title = s.title?.trim()
+			const node = hub(id, 'source', title || (s.url && sourceLink(s) ? urlHost(s.url) : SOURCE_LABEL[s.type]), { sourceType: s.type, ...(sourceLink(s) ? { url: sourceLink(s) } : {}) })
+			// The first lesson with a title names the source; before that, the host or the type.
+			if (title && !titled.has(id)) (titled.add(id), (node.label = title))
+			join(lesson, node, 'source')
+		}
+	}
+	return { version: 3, generatedAt: new Date(now).toISOString(), nodes: [...lessons.reverse(), ...hubs.values()], edges }
+}
+
+/**
+ * The index and the graph, for reading: never committed. The graph joins each entry to the ticket, project, tag and
+ * source it names (see `brainGraph`), so it grows with the number of entries.
  */
 export function brainIndex(entries: BridgeEntry[], now = Date.now()): { index: string; graph: string } {
 	const sorted = [...entries].sort((a, b) => b.at - a.at)
@@ -97,21 +187,5 @@ export function brainIndex(entries: BridgeEntry[], now = Date.now()): { index: s
 		'## Open next actions', '', ...(open.length ? open.slice(0, 40).map((o) => `- **${o.key}** — ${o.next.join(' · ')}`) : ['- None recorded.']), '',
 		'## Recent records', '', ...sorted.slice(0, 100).map(line), '',
 	].join('\n')
-	const edges: { source: string; target: string; kind: string }[] = []
-	const seen = new Set<string>()
-	const last = new Map<string, string>()
-	const link = (group: string, kind: string, id: string) => {
-		const prev = last.get(group)
-		last.set(group, id)
-		if (!prev) return
-		const key = `${[prev, id].sort().join('|')}|${kind}`
-		if (!seen.has(key)) (seen.add(key), edges.push({ source: prev, target: id, kind }))
-	}
-	for (const e of sorted) {
-		if (e.ticket) link(`t:${e.ticket}`, 'ticket', e.id)
-		if (e.project) link(`p:${e.project}`, 'project', e.id)
-		for (const tag of e.tags ?? []) link(`#:${tag}`, 'tag', e.id)
-	}
-	const nodes = sorted.map((e) => ({ id: e.id, label: e.title, type: e.kind, ticket: e.ticket, project: e.project, tags: e.tags ?? [], path: recordPath(e), status: e.status }))
-	return { index, graph: `${JSON.stringify({ version: 2, generatedAt: new Date(now).toISOString(), nodes, edges }, null, 2)}\n` }
+	return { index, graph: `${JSON.stringify(brainGraph(entries, now), null, 2)}\n` }
 }

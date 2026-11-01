@@ -6,7 +6,7 @@
 # It checks Node (22.18+), git and the GitHub CLI login, puts the open-source
 # CLI and skill in ~/workpulse-extension (or updates them), then runs
 # `wp-brain setup`, which asks before it installs anything. Every flag is passed
-# on to setup: --repo --branch --device --create --brief --record --rule --skill.
+# on to setup: --repo --branch --device --create --brief --record --rule --skill --library.
 # Re-running it is safe; it is also how you update.
 #
 # WP_DIR overrides the install folder. Nothing here needs or stores a token: the

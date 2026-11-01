@@ -21,6 +21,10 @@ are to your own Zoho People session and, if you set it up, to your own GitHub re
 | `src-tauri/fixtures/` | Sample Zoho People API responses (fake values) the extension tests parse |
 | `assets/tick/` | The masters of Tick, the cat, 20 six-second clips. `extension/scripts/build-art.mjs` makes the shipped versions |
 
+## Your learning stays yours
+
+There is no server and no shared database. On first run the plugin asks how you want to use it and which private repository holds your learning, then creates it under your own GitHub account. See [where your learning lives](docs/guides/where-your-learning-lives.md).
+
 ## Get started in 5 minutes
 
 1. **Install the extension**: on a Mac or Linux, run

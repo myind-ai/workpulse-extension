@@ -44,4 +44,11 @@ describe('Brain entries in the Learnings list', () => {
 		const local = { id: 'l1', date: '2026-10-24', at: AT - 86_400_000, kind: 'mistake' as const, text: 'again #forms', tags: ['forms'] }
 		expect(repeats([local, ...brainLearnings(entries)], AT)).toEqual([expect.objectContaining({ tag: 'forms', count: 2 })])
 	})
+
+	it('carries the source through, and leaves a learning without one unchanged', () => {
+		const src = parseJsonl([line({ id: 's', kind: 'learning', title: 'From a video', source: { type: 'youtube', url: 'https://youtu.be/abc' } }), line({ id: 'n', kind: 'learning', title: 'Plain' })].join('\n'))
+		const [a, b] = brainLearnings(src)
+		expect(a.source).toEqual({ type: 'youtube', url: 'https://youtu.be/abc' })
+		expect('source' in b).toBe(false)
+	})
 })

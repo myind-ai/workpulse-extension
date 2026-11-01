@@ -128,6 +128,44 @@ class NotesAndIndex(unittest.TestCase):
             self.assertIn("| 2026-10-29 | [X / Y](2024-01-31_x_abc/notes.md) | C | 01:30 | auto | done | no |", index)
 
 
+class SourceType(unittest.TestCase):
+    def test_three_cases(self):
+        self.assertEqual(y.source_type({"extractor_key": "Youtube"}), "youtube")
+        self.assertEqual(y.source_type({"extractor_key": "YoutubeTab"}), "youtube")
+        self.assertEqual(y.source_type({"extractor_key": "Instagram"}), "instagram")
+        self.assertEqual(y.source_type({"extractor_key": "InstagramStory"}), "instagram")
+        self.assertEqual(y.source_type({"extractor_key": "Loom"}), "site")
+        self.assertEqual(y.source_type({}), "site")
+
+    def test_index_falls_back_to_uploader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "2024-01-31_x_abc"
+            folder.mkdir()
+            meta = {"id": "abc", "title": "T", "uploader": "Up", "saved_at": "2026-10-29",
+                    "subtitles": {"kind": "auto"}, "video": None, "duration": 90}
+            (folder / "meta.json").write_text(json.dumps(meta))
+            self.assertIn("| Up |", y.build_index(Path(tmp)).read_text())
+
+
+class IndexVideoColumn(unittest.TestCase):
+    def row(self, video, make=()):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "2024-01-31_x_abc"
+            folder.mkdir()
+            meta = {"id": "abc", "title": "T", "saved_at": "2026-10-29",
+                    "subtitles": {"kind": "auto"}, "video": video, "duration": 90}
+            (folder / "meta.json").write_text(json.dumps(meta))
+            for name in make:
+                (folder / name).write_text("x")
+            return y.build_index(Path(tmp)).read_text()
+
+    def test_yes_only_when_the_file_is_in_the_folder(self):
+        self.assertIn("| yes |", self.row("video.mp4", ["video.mp4"]))
+        self.assertIn("| no |", self.row("video.mp4"))  # restored from the text backup: no media
+        self.assertIn("| no |", self.row(None))
+        self.assertIn("| no |", self.row("video.mp4", ["other.mp4"]))
+
+
 class DownloadSubs(unittest.TestCase):
     def test_each_track_alone_retried_and_whisper_file_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:

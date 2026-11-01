@@ -9,9 +9,14 @@
 //   - the "WorkPulse Brain" rule in ~/.claude/CLAUDE.md (between markers, so a
 //     re-run replaces it instead of adding a second copy)
 //   - the workpulse-brain skill, linked into ~/.claude/skills
+//   - the text backup of lessons, skills and rules ("library": true in brain.json; off unless you say yes)
+//   - the guard (cli/guard.mjs as a PreToolUse hook, ask rules for deploys and destructive git, no Claude attribution
+//     in commits and PRs). Off unless you say yes with --guard yes; a re-run without --guard keeps what is there.
+//   - session memory (cli/memory-hook.mjs on SessionStart, Stop and SessionEnd, the full text of your sessions in a local
+//     database). Off unless you say yes with --memory yes; a re-run without --memory keeps what is there.
 // Settings files are backed up before they are written, and every step can be
 // re-run safely. Answers can be given as flags for a non-interactive run:
-//   --repo owner/repo --create yes --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes
+//   --repo owner/repo --create yes --branch brain --device cli-mac --brief yes --record yes --rule yes --skill yes --library no --guard no --memory no
 // A repository that doesn't exist yet is created private with gh (after asking).
 //
 // CLAUDE_HOME (or Claude Code's own CLAUDE_CONFIG_DIR) overrides ~/.claude.
@@ -21,10 +26,16 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkS
 import { homedir, hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
+import { claudeDir, memoryDbPath, placeHook, removeHook, settingsHasHook, settingsRunHook } from './claude-files.mjs'
+import { checkHookShape, makeMemoryDb, memoryOff, memoryOn, memoryPlace, memoryRow, placeMemoryHooks, readMemory, writeMemoryFlag, brainConfig } from './memory-setup.mjs'
+import { listLibrary, repoVisibility, validDevice } from './library.mjs'
+import { ruleMapState } from './rules.mjs'
 
-const CLAUDE = () => process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+/** These live in claude-files.mjs, which hooks can load cheaply, and memory-setup.mjs; re-exported for the callers here. */
+export { claudeDir, memoryOff, memoryOn, placeHook, placeMemoryHooks, removeHook, settingsHasHook, settingsRunHook }
 const START = '<!-- workpulse-brain:start -->'
 const END = '<!-- workpulse-brain:end -->'
+const STARTER = '# Global Claude Code Rules\n' // what setup starts a missing CLAUDE.md with
 
 const yes = (v) => /^(y|yes|true|1|on)$/i.test(String(v ?? '').trim())
 
@@ -59,6 +70,20 @@ export function ensureRepo({ repo, create, sh = run }) {
 	return 'created'
 }
 
+/** Doctor's rows on where the learning lives: private, not sharing a repository with code, and nothing still pointing at a repository it left. */
+export function repoRows({ cfg, heads, visibility, claude }) {
+	const rows = [{ ok: visibility !== 'public', what: 'Private', detail: visibility === 'public' ? `${cfg.repo} is public: anyone can read your learning. wp-brain move owner/private-repo` : visibility === 'private' ? `${cfg.repo} is private` : `could not tell whether ${cfg.repo} is private (is gh signed in?)` }]
+	const others = (heads ?? '').split('\n').map((l) => l.split('refs/heads/')[1]).filter((b) => b && b !== cfg.branch)
+	if (cfg.branch && others.length) rows.push({ ok: false, what: 'Own repository', detail: `${cfg.repo} also has ${others.slice(0, 3).join(', ')}. If that is code, give your learning its own repository: wp-brain move ${cfg.repo.split('/')[0]}/workpulse-notes` })
+	if (cfg.movedFrom?.repo) {
+		const old = cfg.movedFrom.repo
+		const names = new RegExp(`(?<![\\w.-])${old.replace(/[.\\/]/g, '\\$&')}(?![\\w.-])`, 'i') // me/code, not me/code-notes
+		const stale = ['CLAUDE.md', join('rule-files', 'workpulse-brain.md')].filter((f) => existsSync(join(claude, f)) && names.test(readFileSync(join(claude, f), 'utf8')))
+		rows.push({ ok: !stale.length, what: 'Moved', detail: `from ${old} on ${String(cfg.movedFrom.at).slice(0, 10)}. wp-brain move --catch-up brings across anything written there since${stale.length ? `. ${stale.join(' and ')} still name${stale.length === 1 ? 's' : ''} ${old}` : ''}` })
+	}
+	return rows
+}
+
 /** What is left to do in the browser, with the token page pre-filled. */
 export function extensionSteps({ repo, branch, tokenUrl }) {
 	return [
@@ -68,24 +93,6 @@ export function extensionSteps({ repo, branch, tokenUrl }) {
 		`     ${tokenUrl(repo.split('/')[0])}`,
 		`  3. Paste the token, pick ${repo}, press Back up now.`,
 	].join('\n')
-}
-
-/**
- * True when ~/.claude/settings.json already runs this wp-brain hook itself (from
- * `setup`). The plugin's copy of the hook then stays quiet, so nothing runs twice.
- */
-export function settingsRunHook(settingsText, mark) {
-	try {
-		const hooks = JSON.parse(settingsText || '{}').hooks ?? {}
-		return Object.values(hooks).some((groups) => groups?.some?.((g) => g.hooks?.some((h) => String(h.command ?? '').includes(mark))))
-	} catch {
-		return false
-	}
-}
-
-export const settingsHasHook = (mark) => {
-	const p = join(CLAUDE(), 'settings.json')
-	return existsSync(p) && settingsRunHook(readFileSync(p, 'utf8'), mark)
 }
 
 function report(rows) {
@@ -107,13 +114,12 @@ export function viaPlugin(claude, settings) {
 }
 
 /** What the plugin's SessionStart hook tells Claude while the Brain is not linked yet. */
-export function nudgeText() {
+export function nudgeText(cli = 'wp-brain.mjs') {
 	return [
 		'The WorkPulse Brain plugin is installed but not linked to a repository yet.',
-		'Early in this session, offer the user once, in one line, to link it now; if they say yes, follow the',
-		'"Setup" section of the workpulse-brain skill (it asks the repository with AskUserQuestion, creates it',
-		'private if missing, and prints the browser steps for the extension). If they decline, do not ask again',
-		'in this session.',
+		'In your first reply, before the task, follow the "Setup" section of the workpulse-brain skill: ask with',
+		`AskUserQuestion how the user wants to use it and which private repository holds it, then run node "${cli}" connect.`,
+		'If they choose Not now, carry on with the task and do not ask again in this session; /workpulse-brain:connect asks later.',
 	].join(' ')
 }
 
@@ -171,45 +177,179 @@ export function placeRule(markdown, rule) {
 	return `${markdown.replace(/\s*$/, '')}\n\n${rule}\n`
 }
 
-/** Adds or replaces our hook on one event, leaving every other hook alone. */
-export function placeHook(settings, event, command, mark, extra = {}) {
-	const hooks = (settings.hooks ??= {})
-	const list = (hooks[event] ?? []).map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !String(h.command ?? '').includes(mark)) })).filter((g) => g.hooks.length)
-	list.push({ hooks: [{ type: 'command', command, timeout: 15, ...extra }] })
-	hooks[event] = list
+/**
+ * Puts the rule where it lives: in `rule-files/workpulse-brain.md` when that file holds the marked block (a split moved it there,
+ * so the core gets nothing), else in CLAUDE.md as `placeRule` does. Returns { path, changed }.
+ */
+export function placeRuleIn(claude, rule) {
+	const moved = join(claude, 'rule-files', 'workpulse-brain.md')
+	const target = hasBlock(moved) ? moved : join(claude, 'CLAUDE.md')
+	const before = existsSync(target) ? readFileSync(target, 'utf8') : STARTER
+	const next = placeRule(before, rule)
+	if (next === before) return { path: target, changed: false }
+	if (target !== moved && existsSync(target)) copyFileSync(target, `${target}.wp-brain.bak`)
+	writeFileSync(target, next)
+	return { path: target, changed: true }
+}
+
+const hasBlock = (file) => existsSync(file) && readFileSync(file, 'utf8').includes(START) && readFileSync(file, 'utf8').includes(END)
+
+/** Where the rule is installed, for `doctor`. */
+export function ruleState(claude) {
+	if (hasBlock(join(claude, 'rule-files', 'workpulse-brain.md'))) return { ok: true, detail: 'installed (rule-files/workpulse-brain.md)' }
+	const md = existsSync(join(claude, 'CLAUDE.md')) ? readFileSync(join(claude, 'CLAUDE.md'), 'utf8') : ''
+	if (md.includes(START)) return { ok: true, detail: 'installed' }
+	if (md.includes('## WorkPulse Brain')) return { ok: true, detail: 'present (hand-written; setup will replace it with the managed copy)' }
+	return { ok: false, detail: 'not in CLAUDE.md (setup → question 6)' }
+}
+
+
+/** The marked rule in a CLAUDE.md, or null. */
+export function markedRule(markdown) {
+	const from = markdown.indexOf(START)
+	const to = markdown.indexOf(END)
+	return from >= 0 && to > from ? markdown.slice(from, to + END.length) : null
+}
+
+/** Whether a CLAUDE.md is only what setup wrote, nothing of the owner's: the marked rule, with or without the starter heading. */
+export function onlyRule(markdown) {
+	const rule = markedRule(markdown)
+	if (!rule) return false
+	const rest = markdown.replace(rule, '').trim()
+	return rest === '' || rest === STARTER.trim()
+}
+
+/** Whether a CLAUDE.md has the rule, marked or as a hand-written section (the same test as doctor's). */
+export const holdsRule = (markdown) => markdown.includes(START) || markdown.includes('## WorkPulse Brain')
+
+// ---- the guard -------------------------------------------------------------------------------------
+
+const GUARD_MARK = 'guard.mjs'
+const both = (c) => [`Bash(${c} *)`, `Bash(${c})`]
+/** Ask rules for the hook's gates, so they hold even where the hook cannot run. `vercel env ls` and `supabase db diff` stay free. */
+export const GUARD_ASK_RULES = [
+	...both('git push'),
+	...both('gh pr create'),
+	...both('gh pr merge'),
+	'Bash(vercel)',
+	...both('vercel deploy'),
+	...both('vercel --prod'),
+	...both('supabase functions deploy'),
+	...both('supabase db push'),
+	...both('asc builds upload'),
+	...both('asc publish'),
+	...both('npm publish'),
+	...both('firebase deploy'),
+	...both('git reset --hard'),
+	...both('git checkout -f'),
+	...both('git checkout --force'),
+	'Bash(git clean -f*)',
+	...both('git branch -f'),
+]
+// The files recall and the guard point at, so reading them never prompts: the moved rules, the rules that load on demand, RTK.md.
+export const GUARD_ALLOW = ['Read(~/.claude/rule-files/**)', 'Read(~/.claude/rules/**)', 'Read(~/.claude/RTK.md)']
+// The record keeps the allow rules guardSettings added; an older record held `true` for the first one only.
+const recordedAllow = (rec) => (Array.isArray(rec?.allow) ? rec.allow : rec?.allow ? [GUARD_ALLOW[0]] : [])
+const GUARD_ATTRIBUTION = { commit: '', pr: '', sessionUrl: false }
+
+// What guardSettings added is written down under this key, so removeGuard takes off only that and the owner's own entries stay.
+const GUARD_RECORD = 'workpulseGuard'
+const isOurs = (a) => !!a && a.commit === '' && a.pr === '' && a.sessionUrl === false && Object.keys(a).length === 3
+
+/**
+ * Installs the guard in a settings object: PreToolUse hook on Bash|Artifact, ask rules, the rule-files read, and no attribution
+ * when the owner has none. An `attribution` the owner already has is kept as it is (`doctor` warns when it still shows a trailer,
+ * and the guard denies one). What was added is recorded in `workpulseGuard`. Idempotent; touches nothing else.
+ */
+export function guardSettings(settings, guardPath) {
+	// No record but our hook is there: an install from before the record (or a lost key). What matches is ours, not the owner's.
+	const legacy = settings[GUARD_RECORD] === undefined && !!guardHook(settings)
+	const rec = settings[GUARD_RECORD] ?? (legacy ? { ask: GUARD_ASK_RULES.filter((r) => (settings.permissions?.ask ?? []).includes(r)), allow: GUARD_ALLOW.filter((r) => (settings.permissions?.allow ?? []).includes(r)), attribution: isOurs(settings.attribution) ? 'ours' : 'owner' } : {})
+	removeHook(settings, 'PreToolUse', GUARD_MARK)
+	;(settings.hooks ??= {}).PreToolUse ??= []
+	settings.hooks.PreToolUse.push({ matcher: 'Bash|Artifact', hooks: [{ type: 'command', command: `node "${guardPath}"`, timeout: 5 }] })
+	const perms = (settings.permissions ??= {})
+	const ask = perms.ask ?? []
+	const addedAsk = GUARD_ASK_RULES.filter((r) => !ask.includes(r))
+	perms.ask = [...ask, ...addedAsk]
+	const allow = (perms.allow ??= [])
+	const addedAllow = GUARD_ALLOW.filter((r) => !allow.includes(r))
+	allow.push(...addedAllow)
+	let attribution = 'owner'
+	if (settings.attribution === undefined) {
+		settings.attribution = { ...GUARD_ATTRIBUTION }
+		attribution = 'ours'
+	} else if (rec.attribution === 'ours' && isOurs(settings.attribution)) attribution = 'ours'
+	settings[GUARD_RECORD] = {
+		ask: [...new Set([...(rec.ask ?? []).filter((r) => perms.ask.includes(r)), ...addedAsk])],
+		allow: [...new Set([...recordedAllow(rec).filter((r) => perms.allow.includes(r)), ...addedAllow])],
+		attribution,
+	}
 	return settings
 }
 
-/** Takes our hook off one event (when you answer no on a re-run). */
-export function removeHook(settings, event, mark) {
-	if (!settings.hooks?.[event]) return settings
-	const list = settings.hooks[event].map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !String(h.command ?? '').includes(mark)) })).filter((g) => g.hooks.length)
-	if (list.length) settings.hooks[event] = list
-	else delete settings.hooks[event]
+/** Takes off what guardSettings added (as it recorded), and any container it leaves empty. */
+export function removeGuard(settings) {
+	const rec = settings[GUARD_RECORD]
+	delete settings[GUARD_RECORD]
+	removeHook(settings, 'PreToolUse', GUARD_MARK)
+	if (settings.hooks && !Object.keys(settings.hooks).length) delete settings.hooks
+	const perms = settings.permissions
+	if (perms) {
+		// No record means an install from before it existed: take off every rule we would have added.
+		const ours = rec ? rec.ask ?? [] : GUARD_ASK_RULES
+		if (perms.ask) perms.ask = perms.ask.filter((r) => !ours.includes(r))
+		const ourAllow = rec ? recordedAllow(rec) : GUARD_ALLOW
+		if (perms.allow) perms.allow = perms.allow.filter((r) => !ourAllow.includes(r))
+		for (const k of ['ask', 'allow']) if (perms[k] && !perms[k].length) delete perms[k]
+		if (!Object.keys(perms).length) delete settings.permissions
+	}
+	if (isOurs(settings.attribution) && rec?.attribution !== 'owner') delete settings.attribution
 	return settings
 }
 
-export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpulse-notes', tokenUrl = () => 'https://github.com/settings/personal-access-tokens/new' }) {
+/** The script path in a guard hook command (`node "/path with space/guard.mjs"` or the older unquoted form). */
+export const guardPathOf = (command) => String(command).replace(/^node\s+/, '').replace(/^"(.*)"$/, '$1')
+
+/** The installed guard hook's command, or undefined. */
+const guardHook = (settings) => (settings.hooks?.PreToolUse ?? []).flatMap((g) => g.hooks ?? []).find((h) => String(h.command ?? '').includes(GUARD_MARK))
+
+export async function setup({ opt, config, cliPath, skillDir, init, repoName = 'workpulse-notes', tokenUrl = () => 'https://github.com/settings/personal-access-tokens/new' }) {
 	const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null
 	try {
 		console.log('Link Claude Code on this machine to the WorkPulse Brain. Enter keeps the [default].\n')
 		const login = opt.repo ? null : run('gh', ['api', 'user', '--jq', '.login'])
-		// Seven questions whose defaults are what almost everyone wants: say them once and take one Enter.
-		// `--yes` takes them without asking; "n" walks the seven as before. Flags given still win.
+		// Eight questions whose defaults are what almost everyone wants: say them once and take one Enter.
+		// `--yes` takes them without asking; "n" walks the eight as before. Flags given still win.
+		const libraryNow = readLibrary(config)
+		const guardNow = guardOn(claudeDir())
+		const memoryNow = readMemory(config)
+		const scheduleNow = (await import('./backup-schedule.mjs')).scheduleState().on
 		const device0 = `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`
 		const repo0 = opt.repo && opt.repo !== true ? String(opt.repo) : login ? `${login}/${repoName}` : ''
 		// --repo and --branch (what the extension's copy line passes) fill the summary; any other flag means
 		// the person is choosing for themselves, so they get the questions.
 		const branch0 = opt.branch && opt.branch !== true ? String(opt.branch) : 'brain'
-		const asked = ['device', 'brief', 'record', 'rule', 'skill', 'create'].some((k) => opt[k] !== undefined)
+		const asked = ['device', 'brief', 'record', 'rule', 'skill', 'create', 'library'].some((k) => opt[k] !== undefined)
 		if (repo0 && !asked) {
-			console.log(`Recommended:\n  repository  ${repo0} (created private if it doesn't exist)\n  branch      ${branch0 === '-' ? 'the default branch' : branch0}\n  this machine ${device0}\n  hooks       brief at session start, ask once to record after a commit\n  also        the Brain rule in ~/.claude/CLAUDE.md and the workpulse-brain skill\n`)
-			const take = opt.yes || !rl || yes(await ask(rl, undefined, 'Use the recommended setup? (n = answer each question) Y/n', 'y'))
-			if (take) opt = { create: 'y', device: device0, brief: 'y', record: 'y', rule: 'y', skill: 'y', ...opt, repo: repo0, branch: branch0 }
+			console.log(`Recommended:\n  repository  ${repo0} (created private if it doesn't exist)\n  branch      ${branch0 === '-' ? 'the default branch' : branch0}\n  this machine ${device0}\n  hooks       brief at session start, ask once to record after a commit\n  also        the Brain rule in ~/.claude/CLAUDE.md and the workpulse-brain skill\n  text backup  ${libraryNow ? 'on' : 'off'} (notes, transcripts, skills and rules in your private repo; ask again with --library yes)\n  session memory ${(opt.memory !== undefined && opt.memory !== true ? yes(opt.memory) : memoryNow) ? 'on' : 'off'} (the full text of your sessions in a local database; choose with --memory yes or no)\n  daily backup ${(opt.schedule !== undefined && opt.schedule !== true ? yes(opt.schedule) : scheduleNow) ? 'on' : 'off'} (everything once a day with a LaunchAgent; choose with --schedule yes or no)\n`)
+			const take = opt.yes || opt.defaults || !rl || yes(await ask(rl, undefined, 'Use the recommended setup? (n = answer each question) Y/n', 'y'))
+			if (take) opt = { create: 'y', device: device0, brief: 'y', record: 'y', rule: 'y', skill: 'y', library: libraryNow ? 'y' : 'n', guard: guardNow ? 'y' : 'n', memory: memoryNow ? 'y' : 'n', schedule: scheduleNow ? 'y' : 'n', ...opt, repo: repo0, branch: branch0 }
 			console.log('')
 		}
 		const repo = await ask(rl, opt.repo, '1. Brain repository (owner/repo — the one set in the extension’s Settings → Backup; a new one is created private)', login ? `${login}/${repoName}` : '')
 		if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('A repository is needed, as owner/repo.')
+		const branch = await ask(rl, opt.branch, '2. Branch (the same as the extension’s Backup → Branch; "-" for the default branch)', 'brain')
+		const device = await ask(rl, opt.device, '3. This machine’s name in the Brain', `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`)
+		const brief = yes(await ask(rl, opt.brief, '4. Brief Claude at the start of every session on a ticket branch, and put relevant past lessons in front of each prompt? (SessionStart + UserPromptSubmit hooks) y/n', 'y'))
+		const record = yes(await ask(rl, opt.record, '5. Ask Claude once to record the session after a commit? (Stop hook) y/n', 'y'))
+		const rule = yes(await ask(rl, opt.rule, '6. Add the WorkPulse Brain rule to ~/.claude/CLAUDE.md? y/n', 'y'))
+		const skill = yes(await ask(rl, opt.skill, '7. Link the workpulse-brain skill into ~/.claude/skills? y/n', 'y'))
+		const library = yes(await ask(rl, opt.library, '8. Back up your learning notes and transcripts, and your ~/.claude skills and rules, as text in this private repository, so a new machine can restore them? (secrets are refused; media is never uploaded) y/n', libraryNow ? 'y' : 'n'))
+		const guard = yes(await ask(rl, opt.guard, '9. Install the guard? Claude asks before git push, deploys, publishing and commands that discard work, and commit and PR text carries no Claude attribution (PreToolUse hook + ask rules in settings.json) y/n', guardNow ? 'y' : 'n'))
+		const memory = yes(await ask(rl, opt.memory, '10. Keep the full text of your prompts and answers in a local database, secrets masked, so past sessions can be searched? It stays on this machine, and if you use the vault it also goes into its encrypted backups. (SessionStart, Stop and SessionEnd hooks; turn off any time with wp-brain memory off) y/n', memoryNow ? 'y' : 'n'))
+		const schedule = yes(await ask(rl, opt.schedule, '11. Back up everything once a day on this Mac? (a LaunchAgent runs wp-brain backup-all at low priority, at the next wake if asleep; plain session text only ever leaves encrypted; turn off any time with wp-brain backup schedule off) y/n', scheduleNow ? 'y' : 'n'))
+		if (!validDevice(device)) throw new Error(`The machine name must be letters, digits, dots, dashes or underscores (not "." or ".."), got "${device}".`)
 		if (!opt['no-push']) {
 			let made = 'exists'
 			if (run('gh', ['repo', 'view', repo, '--json', 'name']) == null) {
@@ -218,20 +358,17 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 			}
 			console.log(`   ✓ ${repo} ${made === 'created' ? 'created (private)' : 'found'}`)
 		}
-		const branch = await ask(rl, opt.branch, '2. Branch (the same as the extension’s Backup → Branch; "-" for the default branch)', 'brain')
-		const device = await ask(rl, opt.device, '3. This machine’s name in the Brain', `cli-${hostname().split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '')}`)
-		const brief = yes(await ask(rl, opt.brief, '4. Brief Claude at the start of every session on a ticket branch, and put relevant past lessons in front of each prompt? (SessionStart + UserPromptSubmit hooks) y/n', 'y'))
-		const record = yes(await ask(rl, opt.record, '5. Ask Claude once to record the session after a commit? (Stop hook) y/n', 'y'))
-		const rule = yes(await ask(rl, opt.rule, '6. Add the WorkPulse Brain rule to ~/.claude/CLAUDE.md? y/n', 'y'))
-		const skill = yes(await ask(rl, opt.skill, '7. Link the workpulse-brain skill into ~/.claude/skills? y/n', 'y'))
 		const br = branch === '-' ? '' : branch
 		console.log('')
 
 		// 1–3: the clone and the config.
 		init({ pos: [repo], opt: { ...(br ? { branch: br } : {}), device, ...(opt.clone ? { clone: opt.clone } : {}), ...(opt['no-push'] ? { 'no-push': true } : {}) } })
 
+		writeLibrary(config, library)
+		console.log(`${library ? '✓' : '–'} Text backup of lessons, skills and rules: ${library ? 'on' : 'off'}`)
+
 		// 4–5: hooks, merged into settings.json, with a backup first.
-		const claude = CLAUDE()
+		const claude = claudeDir()
 		mkdirSync(claude, { recursive: true })
 		const settingsPath = join(claude, 'settings.json')
 		const before = existsSync(settingsPath) ? readFileSync(settingsPath, 'utf8') : '{}'
@@ -244,23 +381,48 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 		else removeHook(settings, 'UserPromptSubmit', 'wp-brain.mjs recall')
 		if (record) placeHook(settings, 'Stop', `${node} stop-check 2>/dev/null || true`, 'wp-brain.mjs stop-check')
 		else removeHook(settings, 'Stop', 'wp-brain.mjs stop-check')
+		if (guard) guardSettings(settings, join(dirname(cliPath), 'guard.mjs'))
+		else if (guardNow) removeGuard(settings)
+		// The database first and the flag after the settings, so a failure on the way changes nothing. One settings write, so the
+		// backup is of what was there. A database or hooks that can't be used don't stop the rest of setup: say so and carry on.
+		let memoryProblem = null
+		if (memory) {
+			try {
+				checkHookShape(settings, settingsPath)
+				await makeMemoryDb()
+				placeMemoryHooks(settings, join(dirname(cliPath), 'memory-hook.mjs'))
+			} catch (e) {
+				memoryProblem = e.message
+			}
+		}
 		const after = JSON.stringify(settings, null, 2) + '\n'
 		if (after !== before) {
 			if (existsSync(settingsPath)) copyFileSync(settingsPath, `${settingsPath}.wp-brain.bak`)
 			writeFileSync(settingsPath, after)
 		}
-		console.log(`${brief ? '✓' : '–'} SessionStart brief + prompt recall   ${record ? '✓' : '–'} Stop record   → ${settingsPath}${after !== before ? ' (backup: settings.json.wp-brain.bak)' : ' (unchanged)'}`)
+		console.log(`${brief ? '✓' : '–'} SessionStart brief + prompt recall   ${record ? '✓' : '–'} Stop record   ${guard ? '✓' : '–'} Guard   → ${settingsPath}${after !== before ? ' (backup: settings.json.wp-brain.bak)' : ' (unchanged)'}`)
+		if (memoryProblem) console.log(`! ${memoryProblem}`)
+		else {
+			if (memory || memoryNow) writeMemoryFlag(config, memory)
+			console.log(memory ? `✓ Session memory on, in ${memoryDbPath()}. ${memoryPlace(brainConfig(config))}.` : '– Session memory: off')
+		}
+
+		// The schedule: only on a yes, and a launchctl that refuses doesn't stop the rest of setup.
+		if (schedule || scheduleNow) {
+			const { scheduleOff, scheduleOn } = await import('./backup-schedule.mjs')
+			try {
+				if (schedule) scheduleOn({ cliPath })
+				else scheduleOff()
+				console.log(`${schedule ? '✓' : '–'} Daily backup: ${schedule ? 'on' : 'off'}`)
+			} catch (e) {
+				console.log(`! ${e.message}`)
+			}
+		} else console.log('– Daily backup: off')
 
 		// 6: the global rule.
 		if (rule) {
-			const mdPath = join(claude, 'CLAUDE.md')
-			const md = existsSync(mdPath) ? readFileSync(mdPath, 'utf8') : '# Global Claude Code Rules\n'
-			const next = placeRule(md, ruleText({ repo, branch: br, cli: cliPath }))
-			if (next !== md) {
-				if (existsSync(mdPath)) copyFileSync(mdPath, `${mdPath}.wp-brain.bak`)
-				writeFileSync(mdPath, next)
-			}
-			console.log(`✓ Rule in ${mdPath}${next !== md ? ' (backup: CLAUDE.md.wp-brain.bak)' : ' (unchanged)'}`)
+			const placed = placeRuleIn(claude, ruleText({ repo, branch: br, cli: cliPath }))
+			console.log(`✓ Rule in ${placed.path}${placed.changed ? (placed.path.endsWith('CLAUDE.md') ? ' (backup: CLAUDE.md.wp-brain.bak)' : '') : ' (unchanged)'}`)
 		}
 
 		// 7: the skill.
@@ -283,6 +445,36 @@ export async function setup({ opt, cliPath, skillDir, init, repoName = 'workpuls
 	}
 }
 
+/** Whether settings.json in this Claude folder runs the guard hook. */
+function guardOn(claude) {
+	try {
+		return !!guardHook(JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')))
+	} catch {
+		return false
+	}
+}
+
+/** Whether brain.json says "library": true; a missing or unreadable file means off. */
+function readLibrary(path) {
+	try {
+		return JSON.parse(readFileSync(path, 'utf8')).library === true
+	} catch {
+		return false
+	}
+}
+
+/** Sets or removes "library" in brain.json (init has written it by now); throws when it can't, so setup never says "on" falsely. */
+function writeLibrary(path, on) {
+	try {
+		const cfg = JSON.parse(readFileSync(path, 'utf8'))
+		if (on) cfg.library = true
+		else delete cfg.library
+		writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n')
+	} catch (e) {
+		throw new Error(`Could not ${on ? 'turn on' : 'turn off'} the text backup in ${path}: ${e.message}`)
+	}
+}
+
 const isLink = (p) => {
 	try {
 		return lstatSync(p).isSymbolicLink()
@@ -291,8 +483,65 @@ const isLink = (p) => {
 	}
 }
 
+/**
+ * What the extension's backup left on this branch. Its restorable half is `index.json` + `data/`, the only part the brief
+ * reads. A folder holding other files is not "not on this branch": say what is there, here and on the remote.
+ */
+function backupState(git, cfg) {
+	const dir = cfg.backupDir || 'workpulse'
+	const inRef = (ref) => (git('ls-tree', '-r', '--name-only', ref, '--', `${dir}/`) ?? '').split('\n').filter(Boolean)
+	const here = inRef('HEAD')
+	const there = cfg.branch ? inRef(`origin/${cfg.branch}`) : git('rev-parse', '--abbrev-ref', '@{u}') ? inRef('@{u}') : []
+	const manifest = `${dir}/index.json`
+	const count = Math.max(here.length, there.length)
+	if (existsSync(join(cfg.clone, manifest))) return { ok: true, detail: `${dir}/ present, ${count} files (its Learnings reach the brief)` }
+	if (there.includes(manifest)) return { ok: true, detail: `${dir}/ is on the remote, ${there.length} files, not pulled here yet: wp-brain sync` }
+	if (count) return { ok: false, detail: `${dir}/ holds ${count} files, but no backup data yet (no index.json), so Learnings written in the extension don't reach the brief — Settings → Backup → Back up now` }
+	return { ok: false, detail: 'not on this branch yet — Settings → Backup → Back up now' }
+}
+
+/** The vault's rows. The vault's modules load only when it is on, and these rows never hold the key, only its fingerprint. */
+async function vaultRows(cfg) {
+	const row = (ok, what, detail, critical = false) => ({ ok, what, detail, critical })
+	if (!cfg.vault) return [row(true, 'Vault', 'off — videos and databases have no backup (wp-brain vault init)')]
+	const { parseVaultConfig } = await import('./vault-manifest.mjs')
+	let v
+	try {
+		v = parseVaultConfig(cfg)
+	} catch (e) {
+		return [row(false, 'Vault', `the "vault" section of brain.json is wrong: ${e.message}`, true)]
+	}
+	const { ageAvailable, fingerprint, keystore } = await import('./vault-crypto.mjs')
+	const { accountOf, copyRecorded, list, vaultClone } = await import('./vault.mjs')
+	const rows = [row(true, 'Vault', `on — device ${v.device}`)]
+	const age = ageAvailable()
+	rows.push(row(age, 'Vault age', age ? 'present' : 'not installed: brew install age'))
+	let key = null
+	try {
+		key = keystore.get(accountOf(v))
+		rows.push(row(key !== null, 'Vault key', key !== null ? `present, fingerprint ${fingerprint(key)}` : 'not on this Mac: wp-brain vault key import'))
+	} catch (e) {
+		rows.push(row(false, 'Vault key', e.message))
+	}
+	const copied = key === null ? !!v.keyBackedUpAt : copyRecorded(v, key)
+	rows.push(row(copied, 'Vault key copy', copied ? `offline copy recorded ${v.keyBackedUpAt}` : 'no offline copy of this key recorded, so encrypted backups refuse: wp-brain vault key export, then confirm'))
+	const visibility = repoVisibility(v.repo)
+	rows.push(row(visibility === 'private', 'Vault repo', `${v.repo} is ${visibility === 'unknown' ? 'of unknown visibility (login? network?)' : visibility}`, visibility === 'public'))
+	const clone = vaultClone()
+	if (!existsSync(join(clone, '.git'))) rows.push(row(false, 'Vault snapshot', `no clone at ${clone}: wp-brain vault init`))
+	else {
+		try {
+			const last = list({ cfg: v, clone }).filter((i) => i.kind === 'database').map((i) => i.verifiedAt).filter(Boolean).sort().at(-1)
+			rows.push(row(!!last, 'Vault snapshot', last ? `last verified ${last}` : 'none verified yet'))
+		} catch (e) {
+			rows.push(row(false, 'Vault snapshot', `the manifests could not be read: ${e.message}`))
+		}
+	}
+	return rows
+}
+
 /** Every part of the link, checked; exit 1 when something that matters is missing. */
-export function doctor({ CONFIG, cliPath, readAll }) {
+export async function doctor({ CONFIG, cliPath, readAll, dbLine }) {
 	const rows = []
 	const check = (ok, what, detail, critical = true) => rows.push({ ok, what, detail, critical })
 
@@ -315,6 +564,7 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 			const current = git('branch', '--show-current')
 			check(!cfg.branch || current === cfg.branch, 'Branch', current ?? '?')
 			const remote = git('ls-remote', '--heads', 'origin', ...(cfg.branch ? [cfg.branch] : []))
+			for (const r of repoRows({ cfg, heads: git('ls-remote', '--heads', 'origin'), visibility: repoVisibility(cfg.repo), claude: claudeDir() })) check(r.ok, r.what, r.detail, false)
 			check(remote !== null && remote !== '', 'GitHub', remote === null ? 'cannot reach the repository (login? network?)' : remote === '' ? 'branch not on GitHub yet — it appears with the first entry' : 'reachable', remote === null)
 			const all = readAll(cfg)
 			const byDevice = {}
@@ -323,12 +573,17 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 			const day = (t) => new Date(t).toISOString().slice(0, 10)
 			check(all.length > 0, 'Entries', `${all.length} (${Object.keys(byDevice).length} writers)`, false)
 			check(exts.length > 0, 'Extension seen', exts.length ? exts.map((d) => `${d} ${day(byDevice[d])}`).join(', ') : 'no browser has written yet — Brain page → + Add, or check Settings → Backup', false)
-			const backup = existsSync(join(cfg.clone, cfg.backupDir || 'workpulse', 'index.json'))
-			check(backup, 'Extension backup', backup ? `${cfg.backupDir || 'workpulse'}/ present (its Learnings reach the brief)` : 'not on this branch yet — Settings → Backup → Back up now', false)
+			const folders = listLibrary(cfg.clone, () => '').length
+			check(true, 'Library', cfg.library === true ? `on — ${folders} learning folder${folders === 1 ? '' : 's'} in bridge/library` : `off — notes, transcripts, skills and rules stay on this machine (setup → question 8, or "library": true in brain.json)`, false)
+			const backup = backupState(git, cfg)
+			check(backup.ok, 'Extension backup', backup.detail, false)
+			const db = dbLine(cfg)
+			check(db.ok, 'Local database', db.detail, false)
 		}
+		for (const r of await vaultRows(cfg)) check(r.ok, r.what, r.detail, r.critical)
 	}
 
-	const claude = CLAUDE()
+	const claude = claudeDir()
 	const settingsPath = join(claude, 'settings.json')
 	const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, 'utf8')) : {}
 	const has = (event, mark) => (settings.hooks?.[event] ?? []).flatMap((g) => g.hooks ?? []).find((h) => String(h.command ?? '').includes(mark))
@@ -336,18 +591,31 @@ export function doctor({ CONFIG, cliPath, readAll }) {
 	const stop = has('Stop', 'wp-brain.mjs stop-check')
 	const recall = has('UserPromptSubmit', 'wp-brain.mjs recall')
 	const points = (h) => !h || String(h.command).includes(cliPath)
+	const g = guardHook(settings)
+	if (!g) check(true, 'Guard', 'off — asks before push, deploys and discards are not enforced (setup --guard yes)', false)
+	else {
+		const path = guardPathOf(g.command)
+		check(existsSync(path), 'Guard', existsSync(path) ? `on — ${path}` : `on, but ${path} does not exist; run setup --guard yes again`, false)
+		const att = settings.attribution
+		check(!!att && att.commit === '' && att.pr === '', 'Guard attribution', att && !(att.commit === '' && att.pr === '') ? 'your own attribution setting still adds a trailer to commits or PRs; the guard denies one, but set commit and pr to "" to stop it' : att ? 'commits and PRs carry no attribution' : 'attribution is not switched off in settings.json (setup --guard yes)', false)
+	}
+	const rm = ruleMapState(claude)
+	if (rm.exists) check(rm.ok, 'Rule map', rm.detail, false)
 	// Installed as a Claude Code plugin: the hooks and the skill come from it.
 	const plugin = viaPlugin(claude, settings)
+	const memoryState = memoryRow(cfg, settings, plugin, claude)
+	check(memoryState.ok, memoryState.what, memoryState.detail, memoryState.critical)
+	for (const r of await (await import('./auto-backup.mjs')).backupRows({ cfg, cliPath })) check(r.ok, r.what, r.detail, r.critical)
 	if (plugin) {
-		check(true, 'Plugin', `${plugin} — brings the skill and the three hooks`, false)
+		check(true, 'Plugin', `${plugin} — brings the skill and the hooks`, false)
 		if (start || stop || recall) check(true, 'Hooks', 'settings.json has its own copy too; the plugin’s stay quiet, so nothing runs twice', false)
 		return report(rows)
 	}
 	check(!!start && points(start), 'SessionStart hook', start ? (points(start) ? 'installed' : `points at another copy: ${start.command}`) : 'not installed (setup → question 4)', false)
 	check(!!stop && points(stop), 'Stop hook', stop ? (points(stop) ? 'installed' : `points at another copy: ${stop.command}`) : 'not installed (setup → question 5)', false)
 	check(!!recall && points(recall), 'Prompt recall hook', recall ? (points(recall) ? 'installed' : `points at another copy: ${recall.command}`) : 'not installed (setup → question 4; relevant lessons are not shown per prompt)', false)
-	const md = existsSync(join(claude, 'CLAUDE.md')) ? readFileSync(join(claude, 'CLAUDE.md'), 'utf8') : ''
-	check(md.includes(START) || md.includes('## WorkPulse Brain'), 'Global rule', md.includes(START) ? 'installed' : md.includes('## WorkPulse Brain') ? 'present (hand-written; setup will replace it with the managed copy)' : 'not in CLAUDE.md (setup → question 6)', false)
+	const ruleNow = ruleState(claude)
+	check(ruleNow.ok, 'Global rule', ruleNow.detail, false)
 	const skill = join(claude, 'skills', 'workpulse-brain', 'SKILL.md')
 	check(existsSync(skill), 'Skill', existsSync(skill) ? skill : 'not linked (setup → question 7)', false)
 

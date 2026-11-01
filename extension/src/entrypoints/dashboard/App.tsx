@@ -14,8 +14,10 @@ import { Footer, SideFoot } from './Footer'
 import { Search } from './Search'
 import { BrainView } from './views/BrainView'
 import { ConnectView } from './views/ConnectView'
+import { GraphView } from './views/GraphView'
 import { IssuesView } from './views/IssuesView'
 import { JournalView } from './views/JournalView'
+import { LibraryView } from './views/LibraryView'
 import { LinksView } from './views/LinksView'
 import { ReviewView } from './views/ReviewView'
 import { SettingsView } from './views/SettingsView'
@@ -38,6 +40,8 @@ const VIEWS = [
 	{ id: 'journal', label: 'Learnings', group: 'Work', blurb: 'What you learned, what you would not repeat' },
 	{ id: 'notes', label: 'Page notes', group: 'Work', blurb: 'What you found on a page, where you found it' },
 	{ id: 'brain', label: 'Brain', group: 'Work', blurb: 'Tickets, mistakes, debugging and reports — shared with Claude Code' },
+	{ id: 'library', label: 'Library', group: 'Work', blurb: 'Videos and articles you saved: notes, transcripts, and the lessons from them' },
+	{ id: 'graph', label: 'Graph', group: 'Work', blurb: 'Your lessons, and the tickets, projects, tags and sources that join them' },
 	{ id: 'review', label: 'Timesheet', group: 'Record', blurb: "Today's entries, and the push to Zoho" },
 	{ id: 'record', label: 'Your record', group: 'Record', blurb: 'The six months you cannot remember' },
 	{ id: 'issues', label: 'Regularisation', group: 'Record', blurb: 'Days that will cost you' },
@@ -58,7 +62,7 @@ const TABS: { group: Group | null; label: string; home: ViewId }[] = [
 ]
 
 /** A page whose feature is switched off in this build is not a page at all. */
-const shown = (id: ViewId) => id !== 'brain' || enabled('BRAIN')
+const shown = (id: ViewId) => (id !== 'brain' && id !== 'library' && id !== 'graph') || enabled('BRAIN')
 
 const groupOf = (view: ViewId): Group | null => VIEWS.find((v) => v.id === view)?.group ?? null
 
@@ -151,6 +155,8 @@ export function App() {
 					{route.view === 'team' && <TeamView />}
 					{route.view === 'notes' && <NotesView />}
 					{route.view === 'brain' && <BrainView arg={route.arg} />}
+					{route.view === 'library' && <LibraryView arg={route.arg} />}
+					{route.view === 'graph' && <GraphView arg={route.arg} />}
 					{route.view === 'record' && <RecordView />}
 					{route.view === 'issues' && <IssuesView />}
 					{route.view === 'connect' && <ConnectView />}

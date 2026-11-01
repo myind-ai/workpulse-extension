@@ -9,7 +9,8 @@ and link Claude Code to the same repository, so that both read and write one sha
 in Claude Code `/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension` and answer one
 question → in the extension, paste one token and press **Back up now**. Both sides use the `brain` branch
 without you typing it.
-Related: [README](../../README.md) · [skill](../../skills/workpulse-brain/SKILL.md) · [installer](../../install.sh) · [privacy](../PRIVACY.md)
+Related: [Brain flow and next steps](brain-flow-and-next-steps.md) · [skill](../../skills/workpulse-brain/SKILL.md) ·
+[installer](../../install.sh) · [privacy](../PRIVACY.md)
 
 ## What you end up with
 
@@ -183,6 +184,10 @@ filled in with your repository.
 | `SessionStart hook / Stop hook — not installed` | With the plugin, this is expected: the plugin's hooks aren't in `settings.json`. Check `/plugin` shows workpulse-brain as enabled. Without the plugin, run the connect line again and answer yes |
 | `Config missing` | Run the connect line |
 | Claude Code: `Plugin … not found in marketplace "workpulse"` | See *It says … not found* under step 2: add the marketplace, or `/plugin marketplace update workpulse` |
+
+## Where it all lives
+
+Which repository and database hold what, and how to move a Brain out of a code repository: [where-your-learning-lives.md](where-your-learning-lives.md).
 
 ## What changed
 

@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react'
 
+import { enabled } from '@/core/features'
 import { istDate } from '@/core/time'
 import { call } from '@/lib/rpc'
 import { useAction } from '@/ui/hooks'
@@ -32,6 +33,8 @@ export function Capture({ onSaved }: { onSaved?: () => void }) {
 	const [kind, setKind] = useState<'task' | 'note'>('task')
 	const [repeat, setRepeat] = useState(0)
 	const [said, setSaid] = useState('')
+	const [title, setTitle] = useState('')
+	const [brainSaid, setBrainSaid] = useState('')
 	const { busy, error, run } = useAction()
 
 	// The tab you are on, as the starting point.
@@ -41,6 +44,7 @@ export function Capture({ onSaved }: { onSaved?: () => void }) {
 			.then(([tab]) => {
 				if (!tab?.url || /^chrome/.test(tab.url)) return
 				setUrl(tab.url)
+				setTitle(tab.title ?? '')
 				setText((t) => t || (tab.title ?? ''))
 			})
 			.catch(() => undefined)
@@ -53,6 +57,13 @@ export function Capture({ onSaved }: { onSaved?: () => void }) {
 			setText('')
 			setWhen('')
 			onSaved?.()
+		})
+
+	// Only the address and the title go, and only on this click.
+	const saveToBrain = () =>
+		run(async () => {
+			const r = await call('bridgeSaveUrl', url, title)
+			setBrainSaid(r.duplicate === 'queue' ? 'Already saved and waiting to be read.' : r.duplicate === 'brain' ? 'A lesson already comes from this page.' : 'Saved. Say "process my queue" to Claude when you want it read.')
 		})
 
 	return (
@@ -76,8 +87,14 @@ export function Capture({ onSaved }: { onSaved?: () => void }) {
 					<button className="wp-action" onClick={() => setUrl('')}>
 						drop the link
 					</button>
+					{enabled('BRAIN') && enabled('BRIDGE_SYNC') && (
+						<button className="wp-action" disabled={busy} onClick={saveToBrain}>
+							Save to Brain
+						</button>
+					)}
 				</div>
 			)}
+			{brainSaid && <div className="wp-ok-text wp-small">{brainSaid}</div>}
 
 			<div className="wp-row-wrap wp-small">
 				<span className="wp-muted">Bring it back:</span>

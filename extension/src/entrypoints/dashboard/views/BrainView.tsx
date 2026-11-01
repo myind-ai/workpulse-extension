@@ -9,8 +9,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
-import { describeFilters, matchBrain, parseBrainQuery } from '@/core/brain-query'
-import { filter, KIND_LABEL, KINDS, reportMarkdown, shortId, type BridgeEntry, type EditableField, type EntryKind, type Scope } from '@/core/bridge'
+import { BRAIN_FILTER_HELP, brainArg, describeFilters, matchBrain, parseBrainQuery } from '@/core/brain-query'
+import { filter, KIND_LABEL, KINDS, reportMarkdown, shortId, SOURCE_LABEL, SOURCE_TYPES, sourceLink, sourceOf, urlHost, type BridgeEntry, type EditableField, type EntryKind, type Scope, type SourceType } from '@/core/bridge'
 import { enabled } from '@/core/features'
 import { fileName } from '@/core/export'
 import { istDate, prettyDate } from '@/core/time'
@@ -19,6 +19,7 @@ import { Art } from '@/ui/Art'
 import { Busy } from '@/ui/Busy'
 import { useAction, useLive } from '@/ui/hooks'
 import { Markdown } from '@/ui/Markdown'
+import { SourceChip, SourceFilter, type SourceChoice } from '@/ui/SourceChip'
 
 import { Resume } from './Resume'
 
@@ -45,8 +46,11 @@ export function BrainView({ arg }: { arg?: string }) {
 	const [kind, setKind] = useState<EntryKind | 'all'>('all')
 	const [scope, setScope] = useState<Scope | 'all'>('all')
 	const [query, setQuery] = useState('')
-	const [ticket, setTicket] = useState<string | undefined>(arg)
-	const [project, setProject] = useState<string | undefined>()
+	const target = useMemo(() => brainArg(arg), [arg])
+	const [ticket, setTicket] = useState<string | undefined>(target.ticket)
+	const [project, setProject] = useState<string | undefined>(target.project)
+	const [entry, setEntry] = useState<string | undefined>(target.entry)
+	const [source, setSource] = useState<SourceChoice>('all')
 	const [adding, setAdding] = useState(false)
 	const [asking, setAsking] = useState(false)
 	const [show, setShow] = useState(PAGE)
@@ -54,9 +58,14 @@ export function BrainView({ arg }: { arg?: string }) {
 	const [archived, setArchived] = useState(false)
 	const personal = enabled('PERSONAL')
 
-	// A link from a ticket page (#/brain/PAY-2433) lands filtered to that ticket,
-	// also when the Brain is already open.
-	useEffect(() => setTicket(arg), [arg])
+	// A link from a ticket page (#/brain/PAY-2433, #/brain/project=…, #/brain/q=…, #/brain/entry=…)
+	// lands filtered to that, also when the Brain is already open.
+	useEffect(() => {
+		setTicket(target.ticket)
+		setProject(target.project)
+		setEntry(target.entry)
+		if (target.query !== undefined) setQuery(target.query)
+	}, [target])
 
 	// While this page is open, look every minute; the background looks every fifteen.
 	useEffect(() => {
@@ -70,10 +79,12 @@ export function BrainView({ arg }: { arg?: string }) {
 	// `ticket:PAY-1 type:debug status:open has:next-action #retry after:7d` narrow
 	// it; whatever else is typed is searched as words, as before.
 	const parsed = useMemo(() => parseBrainQuery(query), [query])
-	const found = useMemo(
-		() => filter(((archived ? data?.archived : data?.entries) ?? []).filter((e) => matchBrain(e, parsed.filters)), { kind, scope, query: parsed.text, ticket, project }),
-		[data, kind, scope, parsed, ticket, project, archived],
-	)
+	// The buttons narrow by source too; a `source:` typed in the box wins. `entry=` shows one entry, through the `id:` filter.
+	const filters = useMemo(() => ({ ...parsed.filters, source: parsed.filters.source ?? (source === 'all' ? undefined : source), id: entry?.toLowerCase() ?? parsed.filters.id }), [parsed, source, entry])
+	const found = useMemo(() => {
+		const pool = entry ? [...(data?.entries ?? []), ...(data?.archived ?? [])] : ((archived ? data?.archived : data?.entries) ?? [])
+		return filter(pool.filter((e) => matchBrain(e, filters)), { kind, scope, query: parsed.text, ticket, project })
+	}, [data, kind, scope, parsed, filters, entry, ticket, project, archived])
 	const shown = found.slice(0, show)
 	const s = data?.summary
 
@@ -185,8 +196,9 @@ export function BrainView({ arg }: { arg?: string }) {
 								))}
 							</span>
 						)}
+						{!!s && <SourceFilter value={source} counts={s.bySource} onChange={setSource} />}
 						<input className="wp-input wp-grow" style={{ minWidth: 180 }} placeholder="Search, or filter: ticket:PAY-1 type:debug status:open has:next-action #tag after:7d"
-							title="Filters: ticket: type: status:open|done repo: tag: (or #tag) after: before: (2026-10-01 or 7d) has:next-action|pr|root-cause scope:work|personal" value={query} onChange={(e) => setQuery(e.target.value)} />
+							title={BRAIN_FILTER_HELP} value={query} onChange={(e) => setQuery(e.target.value)} />
 						{(!!data?.archived.length || archived) && (
 							<button className={archived ? 'wp-chip wp-chip-accent' : 'wp-chip'} style={{ cursor: 'pointer' }} aria-pressed={archived} onClick={() => setArchived(!archived)} title="Entries you archived: out of lists, search and Claude's brief">
 								Archived {data?.archived.length ?? 0}
@@ -197,8 +209,8 @@ export function BrainView({ arg }: { arg?: string }) {
 								{f}
 							</span>
 						))}
-						{(ticket || project || query) && (
-							<button className="wp-action" onClick={() => (setTicket(undefined), setProject(undefined), setQuery(''))}>
+						{(ticket || project || query || entry || source !== 'all') && (
+							<button className="wp-action" onClick={() => (setTicket(undefined), setProject(undefined), setEntry(undefined), setSource('all'), setQuery(''))}>
 								clear {ticket ?? project ?? ''}
 							</button>
 						)}
@@ -219,7 +231,7 @@ export function BrainView({ arg }: { arg?: string }) {
 								<div className="wp-card wp-muted">{archived ? 'Nothing archived.' : 'Nothing matches that.'}</div>
 							) : (
 								shown.map((e) => (
-									<EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} ticketId={e.ticket && saved && e.ticket in saved ? saved[e.ticket] : undefined} onCreated={reloadSaved} onChanged={reload} />
+									<EntryCard key={e.id} e={e} onTicket={setTicket} onProject={setProject} ticketId={e.ticket && saved && e.ticket in saved ? saved[e.ticket] : undefined} onCreated={reloadSaved} onChanged={reload} startOpen={!!entry} />
 								))
 							)}
 							{shown.length < found.length && (
@@ -273,6 +285,7 @@ export function EntryCard({
 	ticketId,
 	onCreated,
 	onChanged,
+	startOpen,
 }: {
 	e: BridgeEntry
 	onTicket: (k: string) => void
@@ -282,8 +295,10 @@ export function EntryCard({
 	onCreated?: () => void
 	/** Edit, archive and delete appear only where something can reload after them. */
 	onChanged?: () => void
+	/** Opened already: the page that was asked for this one entry. */
+	startOpen?: boolean
 }) {
-	const [open, setOpen] = useState(false)
+	const [open, setOpen] = useState(!!startOpen)
 	const [editing, setEditing] = useState(false)
 	const [confirm, setConfirm] = useState(false)
 	const make = useAction()
@@ -302,6 +317,7 @@ export function EntryCard({
 				<span className="wp-row-wrap">
 					<span className={`wp-chip ${KIND_COLOUR[e.kind] ?? ''}`}>{KIND_LABEL[e.kind]}</span>
 					{e.scope === 'personal' && <span className="wp-chip">personal</span>}
+					<SourceChip source={sourceOf(e)} />
 					{e.ticket && (
 						<button className="wp-action" onClick={() => onTicket(e.ticket!)}>
 							{e.ticket}
@@ -347,7 +363,7 @@ export function EntryCard({
 							)}
 							{confirm ? (
 								<span className="wp-row" style={{ gap: 4 }}>
-									<span className="wp-muted">Delete everywhere?</span>
+									<span className="wp-muted">Delete everywhere?{e.source?.library ? ' Its library folder stays.' : ''}</span>
 									<button className="wp-action" disabled={change.busy} onClick={() => amend({ state: 'deleted' })}>
 										Yes
 									</button>
@@ -367,11 +383,16 @@ export function EntryCard({
 			{change.error && <div className="wp-banner wp-small">{change.error}</div>}
 			{editing ? <EditEntry e={e} busy={change.busy} onSave={(set) => amend({ set })} onCancel={() => setEditing(false)} /> : <strong>{e.title}</strong>}
 			{!editing && e.subtitle && <span className="wp-muted wp-small">{e.subtitle}</span>}
-			{detail && (
-				<button className="wp-action wp-small" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(!open)} aria-expanded={open}>
-					{open ? 'less' : 'more'}
-				</button>
-			)}
+			<span className="wp-row wp-small">
+				{detail && (
+					<button className="wp-action" onClick={() => setOpen(!open)} aria-expanded={open}>
+						{open ? 'less' : 'more'}
+					</button>
+				)}
+				<a className="wp-link" href={`#/graph/${encodeURIComponent(e.id)}`}>
+					See connections
+				</a>
+			</span>
 			{open && (
 				<div className="wp-stack-sm wp-small">
 					{e.asked && (
@@ -410,11 +431,17 @@ export function EntryCard({
 									{k}
 								</button>
 							))}
-							{e.links.urls?.map((u) => (
-								<a key={u} className="wp-link" href={u} target="_blank" rel="noreferrer">
-									{new URL(u).hostname}
-								</a>
-							))}
+							{e.links.urls?.map((u) =>
+								sourceLink({ type: 'site', url: u }) ? (
+									<a key={u} className="wp-link" href={u} target="_blank" rel="noreferrer">
+										{urlHost(u)}
+									</a>
+								) : (
+									<span key={u} className="wp-muted">
+										{urlHost(u)}
+									</span>
+								),
+							)}
 						</div>
 					)}
 					{!!e.tags?.length && <span className="wp-muted">{e.tags.map((t) => `#${t}`).join(' ')}</span>}
@@ -426,7 +453,9 @@ export function EntryCard({
 
 /** The fields worth correcting later. Only what changed is written. */
 function EditEntry({ e, busy, onSave, onCancel }: { e: BridgeEntry; busy: boolean; onSave: (set: Partial<Pick<BridgeEntry, EditableField>>) => void; onCancel: () => void }) {
-	const [f, setF] = useState({ title: e.title, subtitle: e.subtitle ?? '', body: e.body ?? '', rootCause: e.rootCause ?? '', next: (e.next ?? []).join('\n'), tags: (e.tags ?? []).join(', '), kind: e.kind })
+	const was = sourceOf(e)
+	const [bad, setBad] = useState('')
+	const [f, setF] = useState({ srcType: (was?.type ?? '') as SourceType | '', srcUrl: was?.url ?? '', srcTitle: was?.title ?? '', srcBy: was?.by ?? '', title: e.title, subtitle: e.subtitle ?? '', body: e.body ?? '', rootCause: e.rootCause ?? '', next: (e.next ?? []).join('\n'), tags: (e.tags ?? []).join(', '), kind: e.kind })
 	const save = () => {
 		const set: Partial<Pick<BridgeEntry, EditableField>> = {}
 		if (f.title.trim() !== e.title) set.title = f.title.trim()
@@ -438,6 +467,14 @@ function EditEntry({ e, busy, onSave, onCancel }: { e: BridgeEntry; busy: boolea
 		if (next.join('\n') !== (e.next ?? []).join('\n')) set.next = next
 		const tags = f.tags.split(/[,\s]+/).map((x) => x.replace(/^#/, '').trim().toLowerCase()).filter(Boolean)
 		if (tags.join(',') !== (e.tags ?? []).join(',')) set.tags = tags
+		const url = f.srcUrl.trim()
+		if (url && !sourceLink({ type: 'site', url })) return setBad('The source link must start with http:// or https://')
+		setBad('')
+		// Written only when changed: opening and saving an old lesson must not store a value that was only derived.
+		if (f.srcType) {
+			const changed = f.srcType !== was?.type || url !== (was?.url ?? '') || f.srcTitle.trim() !== (was?.title ?? '') || f.srcBy.trim() !== (was?.by ?? '')
+			if (changed) set.source = { type: f.srcType, ...(url ? { url } : {}), ...(f.srcTitle.trim() ? { title: f.srcTitle.trim() } : {}), ...(f.srcBy.trim() ? { by: f.srcBy.trim() } : {}), ...(e.source?.library ? { library: e.source.library } : {}) }
+		}
 		if (Object.keys(set).length) onSave(set)
 		else onCancel()
 	}
@@ -455,6 +492,22 @@ function EditEntry({ e, busy, onSave, onCancel }: { e: BridgeEntry; busy: boolea
 				</select>
 				<input className="wp-input wp-grow" value={f.tags} placeholder="tags, comma separated" onChange={(x) => setF({ ...f, tags: x.target.value })} aria-label="Tags" />
 			</div>
+			<div className="wp-row-wrap">
+				<select className="wp-select wp-sm" style={{ width: 150 }} value={f.srcType} onChange={(x) => setF({ ...f, srcType: x.target.value as SourceType | '' })} aria-label="Source type">
+					{!was && <option value="">No source</option>}
+					{SOURCE_TYPES.map((k) => (
+						<option key={k} value={k}>
+							{SOURCE_LABEL[k]}
+						</option>
+					))}
+				</select>
+				<input className="wp-input wp-grow" value={f.srcUrl} placeholder="Source link (https://…)" onChange={(x) => setF({ ...f, srcUrl: x.target.value })} aria-label="Source link" />
+			</div>
+			<div className="wp-row-wrap">
+				<input className="wp-input wp-grow" value={f.srcTitle} placeholder="Source title" onChange={(x) => setF({ ...f, srcTitle: x.target.value })} aria-label="Source title" />
+				<input className="wp-input wp-grow" value={f.srcBy} placeholder="By" onChange={(x) => setF({ ...f, srcBy: x.target.value })} aria-label="Source by" />
+			</div>
+			{bad && <div className="wp-banner wp-small">{bad}</div>}
 			<input className="wp-input" value={f.rootCause} placeholder="Root cause" onChange={(x) => setF({ ...f, rootCause: x.target.value })} aria-label="Root cause" />
 			<textarea className="wp-textarea" rows={2} value={f.next} placeholder="Next actions, one per line" onChange={(x) => setF({ ...f, next: x.target.value })} aria-label="Next actions" />
 			<textarea className="wp-textarea" rows={4} value={f.body} placeholder="Details (Markdown)" onChange={(x) => setF({ ...f, body: x.target.value })} aria-label="Details" />

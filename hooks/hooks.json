@@ -9,6 +9,15 @@
             "statusMessage": "WorkPulse Brain brief…"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/memory-hook.mjs\" session-start --plugin 2>/dev/null || true",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "Stop": [
@@ -17,6 +26,26 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/wp-brain.mjs\" stop-check --plugin 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/memory-hook.mjs\" stop --plugin 2>/dev/null || true",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/memory-hook.mjs\" session-end --plugin 2>/dev/null || true",
+            "timeout": 15
           }
         ]
       }

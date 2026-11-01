@@ -2,6 +2,8 @@
 // UserPromptSubmit hook: when a message contains a video link, tell Claude to use the
 // youtube-learning skill, so sharing a link is enough. Prints nothing for any other message.
 // Never blocks the prompt: any error exits 0 silently.
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const YT = /https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?[^\s)>\]]*v=|shorts\/|live\/|playlist\?[^\s)>\]]*list=)|youtu\.be\/)[^\s)>\]]+/gi
 
@@ -35,4 +37,13 @@ async function main() {
 	if (out) process.stdout.write(JSON.stringify(out))
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().catch(() => process.exit(0))
+// Compare real paths: Claude Code may start the hook through a symlinked install folder.
+const isMain = () => {
+	try {
+		return !!process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])
+	} catch {
+		return false
+	}
+}
+
+if (isMain()) main().catch(() => process.exit(0))

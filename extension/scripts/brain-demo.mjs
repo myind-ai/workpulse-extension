@@ -14,96 +14,18 @@
 //   WP_GH_REPO=owner/repo WP_GH_BRANCH=branch WP_GH_TOKEN=$(gh auth token) \
 //     node scripts/brain-demo.mjs - [outDir]
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-import { chromium } from 'playwright'
+import { launch, READ_ONLY, REAL, standIn } from './github-stand-in.mjs'
 
-const EXT = resolve('.output/chrome-mv3')
 const CLONE = resolve(process.argv[2] ?? '.')
 const OUT = resolve(process.argv[3] ?? '../docs/screenshots/brain')
-const REAL = process.env.WP_GH_REPO && process.env.WP_GH_TOKEN ? { repo: process.env.WP_GH_REPO, branch: process.env.WP_GH_BRANCH ?? '', token: process.env.WP_GH_TOKEN } : null
-// Look, do not touch: for checking a real brain without adding to it.
-const READ_ONLY = !!REAL && process.env.WP_READ_ONLY === '1'
 mkdirSync(OUT, { recursive: true })
 
-// ── the stand-in repository ────────────────────────────────────────────────
-const files = {}
-const walk = (dir, rel) => {
-	for (const f of readdirSync(dir, { withFileTypes: true })) {
-		const r = rel ? `${rel}/${f.name}` : f.name
-		if (f.isDirectory()) walk(join(dir, f.name), r)
-		else files[r] = readFileSync(join(dir, f.name), 'utf8')
-	}
-}
-if (!REAL && existsSync(join(CLONE, 'bridge'))) walk(join(CLONE, 'bridge'), 'bridge')
-const seeded = new Set(Object.keys(files))
-const sha = (s) => {
-	let h = 0
-	for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0
-	return (h >>> 0).toString(16).padStart(8, '0')
-}
-let version = 1
-const log = []
-
-async function github(route) {
-	const req = route.request()
-	const url = new URL(req.url())
-	const path = url.pathname.replace(/^\/repos\/[^/]+\/[^/]+/, '')
-	const json = (body, status = 200, headers = {}) => route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) })
-	log.push(`${req.method()} ${url.pathname}${url.search}`)
-	if (req.method() === 'GET' && path === '') return json({ full_name: 'you/workpulse-notes', private: true, permissions: { push: true }, default_branch: 'main' })
-	if (req.method() === 'GET' && path.startsWith('/git/trees/')) {
-		const etag = `"v${version}"`
-		if (req.headers()['if-none-match'] === etag) return route.fulfill({ status: 304, headers: { ETag: etag } })
-		return json({ tree: Object.entries(files).map(([p, t]) => ({ path: p, sha: sha(t), type: 'blob' })) }, 200, { ETag: etag, 'Access-Control-Expose-Headers': 'ETag' })
-	}
-	if (req.method() === 'GET' && path.startsWith('/contents/')) {
-		const p = decodeURIComponent(path.slice('/contents/'.length))
-		if (!(p in files)) return json({ message: 'Not Found' }, 404)
-		return json({ content: Buffer.from(files[p]).toString('base64'), sha: sha(files[p]) })
-	}
-	if (req.method() === 'GET' && path.startsWith('/git/ref/heads/')) return json({ object: { sha: `c${version}` } })
-	if (req.method() === 'GET' && path.startsWith('/git/commits/')) return json({ tree: { sha: `t${version}` } })
-	if (req.method() === 'POST' && path === '/git/trees') {
-		for (const e of JSON.parse(req.postData()).tree) files[e.path] = e.content
-		return json({ sha: `t${version + 1}` })
-	}
-	if (req.method() === 'POST' && path === '/git/commits') return json({ sha: `c${version + 1}` })
-	if (req.method() === 'PATCH' && path.startsWith('/git/refs/heads/')) {
-		version++
-		return json({})
-	}
-	return json({ message: `stand-in does not answer ${req.method()} ${path}` }, 501)
-}
-
-// ── the browser ────────────────────────────────────────────────────────────
-const profile = mkdtempSync(join(tmpdir(), 'workpulse-brain-'))
-const ctx = await chromium.launchPersistentContext(profile, {
-	headless: true,
-	channel: 'chromium',
-	viewport: { width: 1280, height: 900 },
-	serviceWorkers: 'allow',
-	args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
-})
-if (!REAL) await ctx.route('https://api.github.com/**', github)
-// A Jira issue page, for the Brain's related context.
-if (!REAL) await ctx.route('https://acme.atlassian.net/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>[PAY-2433] Webhook retry - Jira</title><h1>PAY-2433 Webhook retry</h1>' }))
-let [sw] = ctx.serviceWorkers()
-if (!sw) sw = await ctx.waitForEvent('serviceworker')
-const extId = new URL(sw.url()).host
-const ext = (p) => `chrome-extension://${extId}/${p}`
-
-// A backup target and a token: the extension only needs them to exist.
-await sw.evaluate(
-	async (t) => {
-		const { settings = {} } = await chrome.storage.local.get('settings')
-		// The daily backup is off: this throwaway profile has nothing worth backing up.
-		await chrome.storage.local.set({ settings: { ...settings, syncRepo: t.repo, syncBranch: t.branch, syncDaily: false }, syncToken: t.token })
-	},
-	REAL ?? { repo: 'you/workpulse-notes', branch: '', token: 'stand-in-token' },
-)
+// The stand-in repository and the browser live in github-stand-in.mjs.
+const { files, seeded, log, github } = standIn(CLONE)
+const { ctx, sw, ext, close } = await launch({ github })
 
 const page = await ctx.newPage()
 const shot = async (name) => {
@@ -328,7 +250,6 @@ const main = async () => {
 try {
 	await main()
 } finally {
-	await ctx.close()
 	// The profile held the token: it does not outlive the run.
-	rmSync(profile, { recursive: true, force: true })
+	await close()
 }

@@ -17,6 +17,8 @@ export interface Learning {
 	tags: string[]
 	/** The ticket it came out of, when it came out of one. */
 	ticketId?: string
+	/** Where a Brain line came from; local notes have none. */
+	source?: { type: 'youtube' | 'instagram' | 'site' | 'workpulse' | 'session' | 'manual'; url?: string; title?: string; by?: string; library?: string }
 }
 
 export const KIND_LABEL: Record<LearnKind, string> = {

@@ -2,6 +2,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { videoLinks, nudge } from './yt-nudge.mjs'
 
@@ -53,4 +56,16 @@ test('the hook prints context for a link and nothing otherwise', () => {
 	assert.match(out.hookSpecificOutput.additionalContext, /youtube-learning skill/)
 	assert.equal(run('no links here'), '')
 	assert.equal(execFileSync('node', [HOOK], { input: 'not json' }).toString(), '')
+})
+
+test('the hook runs when started through a symlink', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'yt-nudge-link-'))
+	try {
+		symlinkSync(new URL('.', import.meta.url), join(dir, 'scripts'))
+		const hook = join(dir, 'scripts', 'yt-nudge.mjs')
+		const out = execFileSync('node', [hook], { input: JSON.stringify({ prompt: 'learn this https://youtu.be/abc123' }) }).toString()
+		assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /youtube-learning skill/)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
 })

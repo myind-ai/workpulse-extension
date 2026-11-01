@@ -13,6 +13,7 @@ import { addDays, istDate, prettyDate } from '@/core/time'
 import { call } from '@/lib/rpc'
 import { useAction, useLive } from '@/ui/hooks'
 import { Markdown } from '@/ui/Markdown'
+import { SourceChip } from '@/ui/SourceChip'
 import { NoteEditor } from '@/ui/NoteEditor'
 import { TagPicker } from '@/ui/TagPicker'
 import { DateField } from '@/ui/TimeField'
@@ -200,6 +201,7 @@ function BrainNote({ note, tickets, onTag }: { note: Learning; tickets: TicketRo
 					<span className="wp-dot" style={{ background: KIND_COLOUR[note.kind] }} />
 					<strong>{KIND_LABEL[note.kind]}</strong>
 					<span className="wp-chip wp-chip-accent">Brain</span>
+					<SourceChip source={note.source} />
 					{note.tags.map((t) => (
 						<button key={t} className="wp-chip" onClick={() => onTag(t)}>
 							#{t}

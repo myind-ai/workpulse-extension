@@ -45,8 +45,8 @@ Each video gets one folder under `~/Documents/youtube-learning/` (env `YT_LEARN_
 | Does | Doesn't |
 |---|---|
 | Hook adds one line of context when a message has a video link | Download anything by itself: Claude runs the script |
-| Keeps everything on this machine | Upload videos or transcripts anywhere |
-| Sends 2–5 one-line lessons + the link to your Brain (`wp-brain`) | Put transcript text in the Brain |
+| Keeps everything on this machine unless you turn on the library, which saves text only (notes, transcript, description, meta) to your own private repo | Ever upload video |
+| Sends 2–5 one-line lessons + the link and source to your Brain (`wp-brain`) | Put transcript text in the Brain |
 | Uses your browser's cookies only with `--cookies-from-browser`, after a bot check | Ask for or type a password |
 
 ## Tests

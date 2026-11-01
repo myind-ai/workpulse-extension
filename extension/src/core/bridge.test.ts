@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import { appendLine, changedFiles, devicesOf, entriesPath, filter, fold, JIRA_COMMANDS, linkTestCode, linkTestFound, linkTestPhrase, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, summarise, tokenUrl } from './bridge'
+import { appendLine, brainOf, cleanSaveUrl, isSavedUrl, libraryKey, changedFiles, devicesOf, EDITABLE, entriesPath, filter, fold, JIRA_COMMANDS, linkTestCode, linkTestFound, linkTestPhrase, newEntry, parseJsonl, reportMarkdown, secretsIn, setupCommands, SOURCE_LABEL, sourceKey, sourceLink, sourceOf, summarise, tokenUrl } from './bridge'
 
 const AT = Date.UTC(2026, 9, 25, 10, 0)
 const e = (o: Record<string, unknown>) => JSON.stringify({ id: 'x', at: AT, kind: 'note', title: 't', ...o })
 
 describe('bridge', () => {
+	it('a change that only sets the source is not an edit; any other change is', () => {
+		const line = (o: Record<string, unknown>) => JSON.stringify({ kind: 'note', title: 'ignored', ...o })
+		const file = (...changes: Record<string, unknown>[]) => ({
+			'bridge/entries/2026-10/a.jsonl': [e({ id: '1', at: AT, title: 'lesson' }), ...changes.map(line)].join('\n'),
+		})
+		const source = { type: 'youtube', url: 'https://youtu.be/a' }
+		const [backfilled] = fold(file({ id: 'c1', at: AT + 5, amends: '1', set: { source } }))
+		expect(backfilled.source).toEqual(source)
+		expect(backfilled.editedAt).toBeUndefined()
+
+		const [real] = fold(file({ id: 'c1', at: AT + 5, amends: '1', set: { title: 'new title' } }))
+		expect(real.editedAt).toBe(AT + 5)
+		const [both] = fold(file({ id: 'c1', at: AT + 5, amends: '1', set: { source, title: 'new title' } }))
+		expect(both.editedAt).toBe(AT + 5)
+		const [archived] = fold(file({ id: 'c1', at: AT + 5, amends: '1', state: 'archived' }), { archived: true })
+		expect(archived.editedAt).toBe(AT + 5)
+		// A real edit before the backfill keeps its own time.
+		const [kept] = fold(file({ id: 'c1', at: AT + 5, amends: '1', set: { title: 'new title' } }, { id: 'c2', at: AT + 9, amends: '1', set: { source } }))
+		expect(kept.editedAt).toBe(AT + 5)
+		expect(kept.source).toEqual(source)
+	})
+
 	it('files entries by month and device', () => {
 		expect(entriesPath(AT, 'mbp-cli')).toBe('bridge/entries/2026-10/mbp-cli.jsonl')
 	})
@@ -61,6 +83,13 @@ describe('bridge', () => {
 		expect(secretsIn('token ghp_abcdefghijklmnopqrstuvwxyz123456')).toEqual(['GitHub token'])
 		expect(secretsIn('plain text')).toEqual([])
 		expect(() => newEntry({ kind: 'note', scope: 'work', title: 'key sk-ant-aaaaaaaaaaaaaaaaaaaaaaaa' }, 'd', AT)).toThrow(/API key/)
+	})
+
+	it('knows the vault key, an age identity, the way the CLI file check does', () => {
+		const key = 'AGE-SECRET-KEY-1' + 'Q'.repeat(58)
+		expect(secretsIn(`the key is ${key}`)).toEqual(['age secret key'])
+		expect(secretsIn('AGE-SECRET-KEY-1 is how one starts')).toEqual([])
+		expect(() => newEntry({ kind: 'note', scope: 'work', title: 'pasted', body: key }, 'd', AT)).toThrow(/age secret key/)
 	})
 
 	it('appends a line to the device file', () => {
@@ -132,6 +161,26 @@ describe('bridge', () => {
 		expect(got.fetch).toEqual(['bridge/entries/2026-10/b.jsonl'])
 		expect(Object.keys(got.shas)).toHaveLength(2)
 	})
+
+	it('also keeps work logs, and nothing from the library, inbox or config', () => {
+		const got = changedFiles({}, [
+			{ path: 'bridge/entries/2026-10/a.jsonl', sha: '1' },
+			{ path: 'bridge/worklogs/2026-10/cli-a.jsonl', sha: '2' },
+			{ path: 'bridge/worklogs/2026-10/notes.txt', sha: '3' },
+			{ path: 'bridge/library/youtube/x/meta.json', sha: '4' },
+			{ path: 'bridge/library/youtube/x/notes.jsonl', sha: '5' },
+			{ path: 'bridge/inbox/cli-a.jsonl', sha: '6' },
+			{ path: 'bridge/config/c.jsonl', sha: '7' },
+		])
+		expect(got.fetch.sort()).toEqual(['bridge/entries/2026-10/a.jsonl', 'bridge/worklogs/2026-10/cli-a.jsonl'])
+		expect(Object.keys(got.shas).sort()).toEqual(got.fetch.sort())
+	})
+
+	it('never reads a work log as a Brain entry', () => {
+		const line = JSON.stringify({ id: 'w1', at: AT, kind: 'learning', title: 'looks like a lesson', device: 'cli-w', schema: 'workpulse.worklog/1', from: AT, to: AT + 6e4, text: 'x' })
+		const files = { 'bridge/worklogs/2026-10/cli-w.jsonl': line, 'bridge/entries/2026-10/cli-a.jsonl': e({ id: 'a', device: 'cli-a' }) }
+		expect(brainOf({ bridge: { files } }).map((x) => x.id)).toEqual(['a'])
+	})
 })
 
 describe('the end-to-end link test', () => {
@@ -166,5 +215,96 @@ describe('when Claude Code says the plugin is not in the marketplace', () => {
 		expect(c.marketplaceUpdate).toBe('/plugin marketplace update workpulse')
 		expect(c.installAt).toBe('/plugin install workpulse-brain@workpulse')
 		expect(c.plugin).toBe('/plugin install workpulse-brain --marketplace myind-ai/workpulse-extension')
+	})
+})
+
+describe('source', () => {
+	const entry = (o: Record<string, unknown>) => parseJsonl(e({ device: 'cli-a', ...o }))[0]
+	it('returns the stored source', () => {
+		const source = { type: 'instagram', url: 'https://www.instagram.com/reel/a/', by: 'someone' }
+		expect(sourceOf(entry({ source }))).toEqual(source)
+	})
+	it('derives youtube from a youtube-learning entry, without the trailing full stop', () => {
+		const got = sourceOf(entry({ project: 'youtube-learning', body: 'From "x" (y) https://www.youtube.com/watch?v=a&t=3s. Notes: z' }))
+		expect(got).toEqual({ type: 'youtube', url: 'https://www.youtube.com/watch?v=a&t=3s' })
+	})
+	it('derives instagram when the url is on instagram.com', () => {
+		expect(sourceOf(entry({ project: 'youtube-learning', body: 'From "x" https://www.instagram.com/reel/abc/. Notes' }))).toEqual({ type: 'instagram', url: 'https://www.instagram.com/reel/abc/' })
+	})
+	it('gives workpulse for an entry written by the extension', () => {
+		expect(sourceOf(entry({ device: 'ext-ab12cd' }))).toEqual({ type: 'workpulse' })
+	})
+	it('gives undefined when nothing says where it came from', () => {
+		expect(sourceOf(entry({}))).toBeUndefined()
+	})
+	it('can be edited, and fold applies a change record that sets it', () => {
+		expect(EDITABLE).toContain('source')
+		const source = { type: 'youtube', url: 'https://youtu.be/a', title: 'T' }
+		const files = {
+			'bridge/entries/2026-10/cli-a.jsonl': [e({ id: 'a', device: 'cli-a' }), e({ id: 'c', at: AT + 5, amends: 'a', set: { source } })].join('\n'),
+		}
+		expect(fold(files)[0].source).toEqual(source)
+	})
+})
+
+describe('source keys and links', () => {
+	const yt = (url: string) => sourceKey({ type: 'youtube', url })
+	it('gives one key per video however it was linked', () => {
+		expect(yt('https://www.youtube.com/watch?v=abc&t=3s')).toBe('youtube:abc')
+		expect(yt('https://youtu.be/abc?t=9')).toBe('youtube:abc')
+		expect(yt('https://www.youtube.com/shorts/abc')).toBe('youtube:abc')
+	})
+	it('drops tracking and trailing slashes, keeps real query values', () => {
+		const k = (url: string) => sourceKey({ type: 'site', url })
+		expect(k('https://Example.COM/a/?utm_source=x&si=1&igsh=2&fbclid=3&t=4')).toBe(k('https://example.com/a'))
+		expect(k('https://example.com/p?id=12')).not.toBe(k('https://example.com/p?id=13'))
+	})
+	it('falls back to the library folder, then the type, then nothing', () => {
+		expect(sourceKey({ type: 'instagram', library: 'instagram/x' })).toBe('library:instagram/x')
+		expect(sourceKey({ type: 'workpulse' })).toBe('type:workpulse')
+		expect(sourceKey(undefined)).toBeUndefined()
+	})
+	it('only links to http(s)', () => {
+		expect(sourceLink({ type: 'site', url: 'javascript:alert(1)' })).toBeUndefined()
+		expect(sourceLink({ type: 'site', url: 'not a url' })).toBeUndefined()
+		expect(sourceLink({ type: 'site', url: 'file:///x' })).toBeUndefined()
+		expect(sourceLink({ type: 'site', url: 'https://a.io/x' })).toBe('https://a.io/x')
+		expect(sourceLink(undefined)).toBeUndefined()
+	})
+	it('names a library folder the same way with or without its prefix', () => {
+		expect(libraryKey('bridge/library/youtube/a')).toBe('youtube/a')
+		expect(libraryKey('youtube/a')).toBe('youtube/a')
+	})
+	it('labels every source, and none as "No source"', () => {
+		expect(SOURCE_LABEL.none).toBe('No source')
+		expect(SOURCE_LABEL.youtube).toBe('YouTube')
+	})
+	it('counts entries by source', () => {
+		const all = parseJsonl([e({ id: '1', source: { type: 'youtube' } }), e({ id: '2', project: 'youtube-learning' }), e({ id: '3' })].join('\n'))
+		expect(summarise(all).bySource).toMatchObject({ youtube: 2, none: 1, site: 0 })
+	})
+})
+
+describe('saving a page to the inbox', () => {
+	it('refuses what is not a web page', () => {
+		for (const raw of ['chrome://x', 'chrome-extension://x/y', 'file:///x', 'not a url']) expect(cleanSaveUrl(raw)).toEqual({ error: 'Only web pages can be saved.' })
+	})
+	it('removes the login and secret-named query values, keeps the rest and the fragment', () => {
+		const got = cleanSaveUrl('https://user:pw@Example.com/a?id=12&Token=x&ACCESS_TOKEN=y&key=1&api_key=2&auth=3&code=4&session=5&sig=6&signature=7&password=8&pwd=9&v=keep#frag')
+		expect(got).toEqual({ url: 'https://example.com/a?id=12&v=keep#frag' })
+	})
+	it('removes the other secret-named query values, whatever their case', () => {
+		const got = cleanSaveUrl('https://example.com/a?apikey=1&client_secret=2&refresh_token=3&id_token=4&secret=5&X-Amz-Signature=6&APIKEY=7&v=keep&tokenizer=stays')
+		expect(got).toEqual({ url: 'https://example.com/a?v=keep&tokenizer=stays' })
+	})
+	it('removes a fragment that carries a token, and keeps every other fragment', () => {
+		for (const f of ['#access_token=abc&state=1', '#state=1&id_token=abc', '#ACCESS_TOKEN=abc', '#/callback?access_token=abc']) expect(cleanSaveUrl(`https://example.com/a?v=1${f}`)).toEqual({ url: 'https://example.com/a?v=1' })
+		for (const f of ['#part', '#/route/a', '#t=42', '#no_access_token', '#my_id_token=x']) expect(cleanSaveUrl(`https://example.com/a${f}`)).toEqual({ url: `https://example.com/a${f}` })
+	})
+	it('knows a saved-url message', () => {
+		const base = { schema: 'workpulse.bridge.msg/1' as const, id: 'a', at: 1, from: 'ext-a', text: 'Save to Brain: https://a.io/' }
+		expect(isSavedUrl({ ...base, type: 'save-url', url: 'https://a.io/' })).toBe(true)
+		expect(isSavedUrl(base)).toBe(false)
+		expect(isSavedUrl({ ...base, type: 'save-url' })).toBe(false)
 	})
 })

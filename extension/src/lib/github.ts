@@ -137,14 +137,36 @@ export class GitHub {
 		}
 	}
 
-	/** A file's current contents and its blob sha, or null if it is not there. */
+	/** A file's current contents and its blob sha, whatever its size, or null if it is not there. */
 	async read(path: string): Promise<{ text: string; sha: string } | null> {
 		const query = this.repo.branch ? `?ref=${encodeURIComponent(this.repo.branch)}` : ''
 		try {
 			const r = (await this.call(`/repos/${this.where}/contents/${encode(path)}${query}`)) as { content?: string; encoding?: string; sha: string }
-			if (!r.content) return null
+			// Over 1 MB the Contents API answers `encoding: none` and no content; an empty file also has none.
+			if (!r.content) {
+				if (!r.sha) return null
+				const text = await this.readBlob(r.sha)
+				// It exists, so "not there" would be a lie: a writer would take it for a new file and replace it.
+				if (text === null) throw new Error(`GitHub lists ${path} but would not give its contents. Sync again in a moment.`)
+				return { text, sha: r.sha }
+			}
 			// GitHub wraps base64 at 60 characters; atob will not have the newlines.
 			return { text: decode(r.content.replace(/\s/g, '')), sha: r.sha }
+		} catch (e) {
+			if (e instanceof GitHubError && e.status === 404) return null
+			throw e
+		}
+	}
+
+	/**
+	 * A file by its blob sha. The Contents API returns an empty body for a file
+	 * over 1 MB; the blob API returns it whole (up to 100 MB). Null when gone.
+	 */
+	async readBlob(sha: string): Promise<string | null> {
+		try {
+			const r = (await this.call(`/repos/${this.where}/git/blobs/${encodeURIComponent(sha)}`)) as { content?: string; encoding?: string }
+			if (typeof r.content !== 'string') return null
+			return r.encoding === 'base64' ? decode(r.content.replace(/\s/g, '')) : r.content
 		} catch (e) {
 			if (e instanceof GitHubError && e.status === 404) return null
 			throw e
@@ -157,7 +179,7 @@ export class GitHub {
 	 * 304 that does not count against the rate limit, which is what makes
 	 * checking every few minutes free when nobody wrote anything.
 	 */
-	async treeIfChanged(etag?: string): Promise<{ etag?: string; files: { path: string; sha: string }[] } | null> {
+	async treeIfChanged(etag?: string): Promise<{ etag?: string; files: { path: string; sha: string }[]; truncated: boolean } | null> {
 		const branch = this.repo.branch?.trim() || (await this.check()).defaultBranch
 		const res = await this.fetchFn(`${API}/repos/${this.where}/git/trees/${encodeURIComponent(branch)}?recursive=1`, {
 			// The ETag is handled here, not by the browser's cache (see `call`).
@@ -172,10 +194,10 @@ export class GitHub {
 		if (res.status === 304) return null
 		const text = await res.text()
 		// An empty repository has no tree yet: nothing to read, not an error.
-		if (res.status === 404 || res.status === 409) return { files: [] }
+		if (res.status === 404 || res.status === 409) return { files: [], truncated: false }
 		if (!res.ok) throw new GitHubError(res.status, explain(res.status, text))
-		const r = JSON.parse(text) as { tree: { path: string; sha: string; type: string }[] }
-		return { etag: res.headers.get('ETag') ?? undefined, files: r.tree.filter((t) => t.type === 'blob').map((t) => ({ path: t.path, sha: t.sha })) }
+		const r = JSON.parse(text) as { tree: { path: string; sha: string; type: string }[]; truncated?: boolean }
+		return { etag: res.headers.get('ETag') ?? undefined, files: r.tree.filter((t) => t.type === 'blob').map((t) => ({ path: t.path, sha: t.sha })), truncated: !!r.truncated }
 	}
 
 	// ── issues, for notes left on a page ──────────────────────────────────

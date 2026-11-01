@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { countKinds, findAll, type Haystack } from './find'
+import { countKinds, findAll, KIND_LABEL, type Haystack } from './find'
 
 const hay: Haystack = {
 	entries: [
@@ -65,5 +65,21 @@ describe('brain entries in the one search', () => {
 		})
 		expect(hits).toHaveLength(1)
 		expect(hits[0]).toMatchObject({ kind: 'brain', text: 'Webhook retry fails', where: 'Debugging · PAY-2433', hash: '#/brain/PAY-2433' })
+	})
+})
+
+describe('library titles', () => {
+	const library = [
+		{ path: 'bridge/library/youtube/2026-10-29_Payments-done-right_abc', title: 'Payments done right', by: 'A Channel', type: 'youtube', at: 10 },
+		{ path: 'bridge/library/site/2026-10-30_Backoff_x', title: 'Backoff with jitter', type: 'site', at: 11 },
+	]
+	it('finds a library item by a title word, labelled Library, linking to its page', () => {
+		const hit = findAll('payments', { ...hay, library })[0]
+		expect(hit).toMatchObject({ kind: 'library', text: 'Payments done right', hash: `#/library/${encodeURIComponent(library[0].path)}` })
+		expect(KIND_LABEL.library).toBe('Library')
+	})
+	it('counts a word only in the by field, as where does, and searches nothing else', () => {
+		expect(findAll('channel', { ...hay, library }).map((h) => h.kind)).toEqual(['library'])
+		expect(findAll('transcript', { ...hay, library })).toEqual([])
 	})
 })

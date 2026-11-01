@@ -34,6 +34,10 @@ export const KIND_LABEL: Record<EntryKind, string> = {
 
 export type Scope = 'work' | 'personal'
 
+/** Where a lesson came from. */
+export const SOURCE_TYPES = ['youtube', 'instagram', 'site', 'workpulse', 'session', 'manual'] as const
+export type SourceType = (typeof SOURCE_TYPES)[number]
+
 export interface BridgeEntry {
 	schema: typeof SCHEMA
 	id: string
@@ -52,6 +56,8 @@ export interface BridgeEntry {
 	/** The repository or side project, e.g. `acme/payments-web` or `workpulse`. */
 	project?: string
 	tags?: string[]
+	/** Where it came from: a video, a page, the extension, a session. Older entries have none; `sourceOf` works it out. */
+	source?: { type: SourceType; url?: string; title?: string; by?: string; library?: string }
 	/** For a ticket: asked, done, root cause, mistakes, what is next. */
 	asked?: string
 	done?: string
@@ -75,7 +81,7 @@ export interface BridgeEntry {
 }
 
 /** What an edit may change. */
-export const EDITABLE = ['title', 'subtitle', 'body', 'kind', 'tags', 'ticket', 'project', 'asked', 'done', 'rootCause', 'status', 'next'] as const
+export const EDITABLE = ['title', 'subtitle', 'body', 'kind', 'tags', 'ticket', 'project', 'asked', 'done', 'rootCause', 'status', 'next', 'source'] as const
 export type EditableField = (typeof EDITABLE)[number]
 
 /** A request from the extension for the CLI to pick up. */
@@ -87,7 +93,45 @@ export interface InboxMessage {
 	text: string
 	ticket?: string
 	project?: string
+	/** A page saved with the Save to Brain button. `text` stays `Save to Brain: <url>`, so an older CLI still shows something true. */
+	type?: 'save-url'
+	url?: string
+	title?: string
 }
+
+/** A page this browser sent, and how far the CLI has got with it. */
+export interface SavedUrl {
+	id: string
+	url: string
+	title?: string
+	at: number
+	state: 'waiting' | 'claimed' | 'done' | 'failed'
+	why?: string
+	by?: string
+}
+
+const SECRET_QUERY = /^(token|access_token|id_token|refresh_token|key|api_key|apikey|client_secret|secret|auth|code|session|sig|signature|x-amz-signature|password|pwd)$/i
+/** A sign-in reply puts its tokens in the fragment. Any other fragment stays. */
+const SECRET_FRAGMENT = /[#&?/;](access_token|id_token)=/i
+
+/** The address of a web page that is safe to send: no login, no secret-named query values. Anything else is refused. */
+export function cleanSaveUrl(raw: string): { url: string } | { error: string } {
+	let u: URL
+	try {
+		u = new URL(raw.trim())
+	} catch {
+		return { error: 'Only web pages can be saved.' }
+	}
+	if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: 'Only web pages can be saved.' }
+	u.username = ''
+	u.password = ''
+	for (const k of [...new Set([...u.searchParams.keys()])]) if (SECRET_QUERY.test(k)) u.searchParams.delete(k)
+	if (SECRET_FRAGMENT.test(u.hash)) u.hash = ''
+	return { url: u.href }
+}
+
+/** Is this inbox message a page to save (rather than a free-text request)? */
+export const isSavedUrl = (m: InboxMessage): boolean => m.type === 'save-url' && typeof m.url === 'string' && m.url !== ''
 
 export const ROOT = 'bridge'
 export const entriesPath = (at: number, device: string) => `${ROOT}/entries/${new Date(at).toISOString().slice(0, 7)}/${device}.jsonl`
@@ -97,7 +141,7 @@ export const inboxPath = (msg: InboxMessage) => `${ROOT}/inbox/to-cli/${new Date
 // Agent sessions see terminal output, .env files and stack traces. Nothing that
 // looks like a credential is written, by either side.
 
-const SECRET_SHAPES: [string, RegExp][] = [
+export const SECRET_SHAPES: [string, RegExp][] = [
 	['GitHub token', /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/],
 	['API key', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|\bsk_(live|test)_[A-Za-z0-9]{16,}/],
 	['Supabase token', /\bsbp_[A-Za-z0-9]{20,}|service_role/],
@@ -105,6 +149,7 @@ const SECRET_SHAPES: [string, RegExp][] = [
 	['Slack token', /\bxox[abpr]-[A-Za-z0-9-]{10,}/],
 	['Private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
 	['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
+	['age secret key', /AGE-SECRET-KEY-1[0-9A-Z]{20,}/],
 ]
 
 /** What in this text looks like a secret, by name — never the value. */
@@ -116,6 +161,89 @@ export function secretsIn(text: string): string[] {
 
 const TAG = /(^|\s)#([\w-]+)/g
 export const tagsOf = (text: string): string[] => [...new Set([...text.matchAll(TAG)].map((m) => m[2].toLowerCase()))]
+
+const FIRST_URL = /https?:\/\/[^\s)<>\]"']+/
+
+/** What each source is called wherever a page shows one. */
+export const SOURCE_LABEL: Record<SourceType | 'none', string> = {
+	youtube: 'YouTube',
+	instagram: 'Instagram',
+	site: 'Site',
+	workpulse: 'WorkPulse',
+	session: 'Session',
+	manual: 'Manual',
+	none: 'No source',
+}
+
+/** The files of a library folder that are ever read, written or shown. `.owner` and media are not among them. */
+export const LIBRARY_FILES = ['notes.md', 'transcript.md', 'transcript.txt', 'article.md', 'description.md', 'meta.json']
+
+/** The folder of a saved library item as `<type>/<folder>`, whether given with or without `bridge/library/`. */
+export function libraryKey(path: string): string {
+	return path.replace(/^\/+/, '').replace(/^bridge\/library\//, '').split('/').filter(Boolean).slice(0, 2).join('/')
+}
+
+const TRACKING = /^(utm_.*|t|si|igsh|fbclid)$/i
+const YT_HOST = /^(www\.|m\.|music\.)?youtube\.com$/i
+
+const parseHttp = (url?: string): URL | undefined => {
+	if (!url) return undefined
+	try {
+		const u = new URL(url)
+		return u.protocol === 'http:' || u.protocol === 'https:' ? u : undefined
+	} catch {
+		return undefined
+	}
+}
+
+/** The hostname of a link, or the text itself when it is not a URL: showing a bad value must never throw. */
+export function urlHost(u: string): string {
+	try {
+		return new URL(u).hostname || u
+	} catch {
+		return u
+	}
+}
+
+/** The URL of a source if it is a safe http(s) link, else nothing: a bad value must never become a link. */
+export function sourceLink(s: BridgeEntry['source']): string | undefined {
+	return parseHttp(s?.url)?.href && s?.url?.trim()
+}
+
+/**
+ * One stable key per thing a lesson came from, so lessons from the same video meet whatever timestamp they carry:
+ * `youtube:<id>`, else the page without tracking, else the library folder, else the type, else nothing.
+ */
+export function sourceKey(s: BridgeEntry['source']): string | undefined {
+	if (!s) return undefined
+	const u = parseHttp(s.url)
+	if (u) {
+		const host = u.hostname.toLowerCase()
+		let id: string | undefined
+		if (host === 'youtu.be') id = u.pathname.split('/')[1]
+		else if (YT_HOST.test(host)) id = u.pathname === '/watch' ? (u.searchParams.get('v') ?? undefined) : u.pathname.match(/^\/(?:shorts|embed|live|v)\/([^/]+)/)?.[1]
+		if (id) return `youtube:${id}`
+		const keep = [...u.searchParams].filter(([k]) => !TRACKING.test(k))
+		const q = keep.length ? `?${keep.map(([k, v]) => `${k}=${v}`).join('&')}` : ''
+		return `${host}${u.port ? `:${u.port}` : ''}${u.pathname.replace(/\/+$/, '')}${q}`
+	}
+	if (s.library) return `library:${libraryKey(s.library)}`
+	return `type:${s.type}`
+}
+
+/**
+ * Where an entry came from: what it says, else what can be told from it. A youtube-learning entry is
+ * `youtube` (or `instagram` when its link is), one written by a browser is `workpulse`, anything else none.
+ */
+export function sourceOf(e: BridgeEntry): BridgeEntry['source'] | undefined {
+	if (e.source && SOURCE_TYPES.includes(e.source.type)) return e.source
+	if (e.project === 'youtube-learning') {
+		const url = e.body?.match(FIRST_URL)?.[0].replace(/[.,;:!?]+$/, '')
+		return { type: url && /^https?:\/\/([\w-]+\.)*instagram\.com\//i.test(url) ? 'instagram' : 'youtube', ...(url ? { url } : {}) }
+	}
+	if (e.device?.startsWith('ext-')) return { type: 'workpulse' }
+	return undefined
+}
 
 /** A line that is not an entry is skipped, not fatal: one bad line must not hide a month. */
 export function parseEntry(line: string): BridgeEntry | null {
@@ -175,7 +303,9 @@ export function fold(files: Record<string, string>, opts: { archived?: boolean }
 	for (const c of changes.sort((a, b) => a.at - b.at)) {
 		const target = byId.get(c.amends!)
 		if (!target) continue
-		const next: BridgeEntry = { ...target, editedAt: c.at }
+		const next: BridgeEntry = { ...target }
+		// Giving a lesson its source says where it came from, not a new version of it: a backfill marks nothing as edited.
+		if (c.state || Object.keys(c.set ?? {}).join() !== 'source') next.editedAt = c.at
 		for (const key of EDITABLE) {
 			const v = c.set?.[key]
 			if (v === undefined) continue
@@ -198,7 +328,7 @@ export function fold(files: Record<string, string>, opts: { archived?: boolean }
  * offline applies too).
  */
 export const brainOf = (rt: { bridge?: { files?: Record<string, string>; queue?: BridgeEntry[] } }, archived = false): BridgeEntry[] =>
-	fold({ ...(rt.bridge?.files ?? {}), 'queue/this-browser.jsonl': (rt.bridge?.queue ?? []).map((e) => JSON.stringify(e)).join('\n') }, { archived })
+	fold({ ...Object.fromEntries(Object.entries(rt.bridge?.files ?? {}).filter(([p]) => !p.startsWith(WORKLOGS))), 'queue/this-browser.jsonl': (rt.bridge?.queue ?? []).map((e) => JSON.stringify(e)).join('\n') }, { archived })
 
 /** Two titles that say the same thing: case, spacing, #tags and a closing full stop aside. */
 export const sameTitle = (a: string, b: string) => {
@@ -250,6 +380,8 @@ export interface Summary {
 	byKind: Record<EntryKind, number>
 	tickets: { key: string; count: number; last: number; title: string }[]
 	projects: { name: string; scope: Scope; count: number; last: number }[]
+	/** Entries per source; `none` is the rest. */
+	bySource: Record<SourceType | 'none', number>
 	/** Mistakes whose tag came up more than once: the ones worth a habit. */
 	repeats: { tag: string; count: number }[]
 }
@@ -259,8 +391,10 @@ export function summarise(entries: BridgeEntry[]): Summary {
 	const tickets = new Map<string, Summary['tickets'][number]>()
 	const projects = new Map<string, Summary['projects'][number]>()
 	const mistakeTags = new Map<string, number>()
+	const bySource = Object.fromEntries([...SOURCE_TYPES, 'none'].map((k) => [k, 0])) as Summary['bySource']
 	for (const e of entries) {
 		byKind[e.kind]++
+		bySource[sourceOf(e)?.type ?? 'none']++
 		if (e.ticket) {
 			const t = tickets.get(e.ticket) ?? { key: e.ticket, count: 0, last: 0, title: '' }
 			t.count++
@@ -279,6 +413,7 @@ export function summarise(entries: BridgeEntry[]): Summary {
 	return {
 		total: entries.length,
 		byKind,
+		bySource,
 		tickets: [...tickets.values()].sort((a, b) => b.last - a.last),
 		projects: [...projects.values()].sort((a, b) => b.last - a.last),
 		repeats: [...mistakeTags.entries()]
@@ -434,12 +569,25 @@ export function tokenUrl(owner = ''): string {
 	return `https://github.com/settings/personal-access-tokens/new?${q}`
 }
 
+const ACK = /^bridge\/inbox\/acks\/[^/]+\/([^/]+)\.json$/
+
+/** Acknowledgements of saved pages in the tree: id (the file name) → path and blob sha. Not `changedFiles`, which keeps only Brain files. */
+export function ackFiles(tree: { path: string; sha: string }[]): { id: string; path: string; sha: string }[] {
+	return tree.flatMap((f) => {
+		const m = ACK.exec(f.path)
+		return m ? [{ id: m[1], path: f.path, sha: f.sha }] : []
+	})
+}
+
+const WORKLOGS = `${ROOT}/worklogs/`
+
 /** Which files under bridge/ moved since last time, by blob sha. */
 export function changedFiles(seen: Record<string, string>, tree: { path: string; sha: string }[]): { fetch: string[]; shas: Record<string, string> } {
 	const shas: Record<string, string> = {}
 	const fetch: string[] = []
 	for (const f of tree) {
-		if (!f.path.startsWith(`${ROOT}/entries/`) || !f.path.endsWith('.jsonl')) continue
+		// Entries, and Claude Code work logs (read by the importer, never shown as entries).
+		if (!(f.path.startsWith(`${ROOT}/entries/`) || f.path.startsWith(WORKLOGS)) || !f.path.endsWith('.jsonl')) continue
 		shas[f.path] = f.sha
 		if (seen[f.path] !== f.sha) fetch.push(f.path)
 	}

@@ -53,16 +53,29 @@ two-to-five lessons that matter into the Brain, where the next brief will surfac
      or looked wrong, and what to verify.
    - `subtitles.kind` is auto/auto-translated/whisper → keep the transcript's warning in mind and say in
      *Questions* which terms were unclear.
-5. **Record in the Brain** (pushing to `brain` is pre-authorised), 2–5 learnings, not one per bullet:
+5. **Save the text to the library** (before the lessons, so they can point at it). Read `source_type` from the fetch JSON:
    ```bash
    WP="${WP_CLI:-$HOME/workpulse-extension/cli/wp-brain.mjs}"   # or wherever `wp-brain setup` installed it
+   node $WP library add "<folder>" --type <source_type>        # prints: library: <relative path>
+   ```
+   Keep the printed path for `--source-library`. If it fails because the library is off (`"library": true` is not in
+   brain.json), or because this wp-brain is older and has no `library` command (`Unknown command "library"`; updating
+   the plugin or re-running `install.sh` brings it), say so once in the reply and carry on without `--source-library`;
+   the text stays on this machine.
+6. **Record in the Brain** (pushing to `brain` is pre-authorised), 2–5 learnings, not one per bullet:
+   ```bash
    node $WP add learning "<the lesson as one line> #youtube #<topic>" --scope personal --project youtube-learning \
+     --source-type <source_type> --source-url "<url>" --source-title "<title>" --source-by "<channel>" \
+     --source-library "<path printed by library add>" \
      --body "From \"<title>\" (<channel>) <url>&t=<N>s. Notes: <folder>/notes.md"
    ```
+   `--source-by` is `channel` from meta.json, or `uploader` when it has none (the same for `<channel>` in the body).
    Put each returned `[id]` under *Recorded in the Brain*. If wp-brain fails (no config, offline), keep going
    and say in the reply that the Brain was not updated.
-6. **Index:** `python3 $S/yt_learn.py index` (fetch already does it; run it again after the notes so the row says `done`).
-7. **Reply** with the folder path, the 3–5 key points (each with its timestamp link), what went to the Brain,
+7. **Save the finished notes to the library** so the backup holds the `[id]`s too: run the same `library add` as in
+   step 5 again. It is safe to repeat (nothing commits when nothing changed); skip it if step 5 failed.
+8. **Index:** `python3 $S/yt_learn.py index` (fetch already does it; run it again after the notes so the row says `done`).
+9. **Reply** with the folder path, the 3–5 key points (each with its timestamp link), what went to the Brain,
    and any problems. The full notes stay in the file.
 
 **Getting the knowledge back when it's needed.** The Brain entries are the recall path, not the notes folder:
@@ -112,8 +125,9 @@ For an Instagram link, what you get:
 
 ## Rules
 
-- **Personal learning use.** Downloads stay on this machine. Never upload a video, a transcript or long quotes
-  anywhere (Brain entries are one-line lessons in the user's words plus the link, not transcript text).
+- **Personal learning use.** Everything stays on this machine unless you turn on the library, which saves text
+  only (notes, transcript, description, meta) to your own private repo; video never leaves. Never upload a video
+  or long quotes anywhere (Brain entries are one-line lessons in the user's words plus the link, not transcript text).
 - Notes are written, not pasted: no transcript paragraphs copied into notes.md.
 - Never type a password; cookies come only from the user's own browser, and only after a bot check.
 

@@ -41,6 +41,7 @@ import { periodReport, periodText, spanFrom, type PeriodReport, type Span } from
 import { countKinds, findAll, type Hit, type HitKind } from '@/core/find'
 import { matchBrain, parseBrainQuery } from '@/core/brain-query'
 import { brainOf, KIND_LABEL as BRAIN_KIND } from '@/core/bridge'
+import { titleFromFolder } from '@/core/library'
 import { isComplete, lastDays, lockLine, owedDays, streakOf, type DayState, type Owed, type Streak } from '@/core/habit'
 import { leftAt, regularisationNote } from '@/core/closeout'
 import { describeAdd, shortTicket, undoLabel, undoOffered, type Undoable } from '@/core/undo'
@@ -411,6 +412,17 @@ export class DayCommands {
 	}
 
 	/**
+	 * Rows the person removed that came from a Claude Code work log. Remembered before they go: the
+	 * importer treats a missing row as one to bring back (a restore needs that), so without this a
+	 * deleted row reappears on the next poll. Newest 2,000, like `importedWorklogs`.
+	 */
+	protected async dismissWorklogs(rows: { bridgeWorklogId?: string }[]): Promise<void> {
+		const ids = rows.map((e) => e.bridgeWorklogId).filter((id): id is string => !!id)
+		if (!ids.length) return
+		await this.store.updateRuntime((r) => void (r.bridge = { ...r.bridge, dismissedWorklogs: [...new Set([...(r.bridge?.dismissedWorklogs ?? []), ...ids])].slice(-2000) }))
+	}
+
+	/**
 	 * Remove an entry.
 	 *
 	 * The Review page has offered a Delete button on every unsynced row since
@@ -426,6 +438,7 @@ export class DayCommands {
 		const gone = list.find((e) => e.uid === uid)
 		if (!gone) throw new Error('That entry is already gone.')
 		if (gone.synced) throw new Error('That one is already in Zoho — remove it there instead.')
+		await this.dismissWorklogs([gone])
 		await this.store.setEntries(date, list.filter((e) => e.uid !== uid))
 		if (gone.meetingId) {
 			const meetings = await this.store.meetings()
@@ -3478,6 +3491,8 @@ export class DayCommands {
 		const from = addDays(today, -days)
 		const [tickets, tasks, learnings, rt] = await Promise.all([this.store.workspaces(), this.store.tasks(), this.store.learnings(), this.store.runtime()])
 		const all = brainOf(rt)
+		// Titles only; a folder whose meta is not read yet is known by its name.
+		const library = (rt.bridge?.library ?? []).map((i) => ({ path: i.path, title: i.title ?? titleFromFolder(i.folder), by: i.by, type: i.type, at: i.savedAt ? Date.parse(i.savedAt) || 0 : 0 }))
 		const asHay = (list: typeof all) => list.map((e) => ({ id: e.id, title: e.title, subtitle: e.subtitle, kind: BRAIN_KIND[e.kind] ?? e.kind, ticket: e.ticket, at: e.at, more: [e.body, e.asked, e.done, e.rootCause, e.project, ...(e.tags ?? []), ...(e.next ?? [])].filter(Boolean).join(' ') }))
 		// `ticket:`, `type:`, `has:next-action` … are about the Brain: with any of
 		// them, the search is the Brain's alone, and filters with no words list
@@ -3485,10 +3500,16 @@ export class DayCommands {
 		const q = parseBrainQuery(query, this.now())
 		if (q.filtered) {
 			const pool = asHay(all.filter((e) => matchBrain(e, q.filters)))
+			// A saved item has a type and nothing else a filter can ask about, so only `source:` reaches it.
+			const only = !!q.filters.source && !q.filters.ticket && !q.filters.type && !q.filters.status && !q.filters.project && !q.filters.scope && !q.filters.id && !q.filters.library && !q.filters.tags.length && !q.filters.has.length && q.filters.after === undefined && q.filters.before === undefined
+			const saved = only ? library.filter((l) => l.type === q.filters.source) : []
 			const none = { entries: [], notes: [], learnings: [], tickets: [], links: [], tasks: [] }
 			const hits = q.text.trim().length >= 2
-				? findAll(q.text, { ...none, brain: pool })
-				: pool.sort((a, b) => b.at - a.at).slice(0, 60).map((b): Hit => ({ kind: 'brain', text: b.subtitle ? `${b.title} — ${b.subtitle}` : b.title, where: [b.kind, b.ticket].filter(Boolean).join(' · '), at: b.at, score: 1, hash: b.ticket ? `#/brain/${b.ticket}` : '#/brain' }))
+				? findAll(q.text, { ...none, brain: pool, library: saved })
+				: [
+					...pool.map((b): Hit => ({ kind: 'brain', text: b.subtitle ? `${b.title} — ${b.subtitle}` : b.title, where: [b.kind, b.ticket].filter(Boolean).join(' · '), at: b.at, score: 1, hash: b.ticket ? `#/brain/${b.ticket}` : '#/brain' })),
+					...saved.map((l): Hit => ({ kind: 'library', text: l.title, where: l.by || l.type, at: l.at, score: 1, hash: `#/library/${encodeURIComponent(l.path)}` })),
+				].sort((a, b) => b.at - a.at).slice(0, 60)
 			return { hits, kinds: countKinds(hits) }
 		}
 		const entries: { date: string; text: string; slotStart: number }[] = []
@@ -3503,6 +3524,7 @@ export class DayCommands {
 			links: tickets.flatMap((w) => w.tabs.map((t) => ({ ticketId: w.id, ticketName: w.name, title: t.title, url: t.url, note: t.note, addedAt: t.addedAt }))),
 			tasks: tasks.map((t) => ({ uid: t.uid, title: t.title, key: t.key, status: t.status, createdAt: t.createdAt })),
 			brain: asHay(all),
+			library,
 		})
 		return { hits, kinds: countKinds(hits) }
 	}

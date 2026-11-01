@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { BridgeEntry } from './bridge'
-import { describeFilters, matchBrain, parseBrainQuery, recallFor, relatedTo, samePage, searchBrain, stem, whenOf } from './brain-query'
+import { shortId, type BridgeEntry } from './bridge'
+import { brainArg, brainHash, describeFilters, matchBrain, parseBrainQuery, recallFor, relatedTo, rankTitles, samePage, searchBrain, stem, whenOf } from './brain-query'
 
 const NOW = Date.UTC(2026, 9, 27, 12)
 const base: BridgeEntry = { schema: 'workpulse.bridge.entry/1', id: 'e1', at: Date.UTC(2026, 9, 20), device: 'cli-a', kind: 'debug', scope: 'work', title: 'Retry webhook reused key' }
@@ -143,5 +143,74 @@ describe('recallFor', () => {
 
 	it('ignores URLs and filter-looking words in the prompt', () => {
 		expect(recallFor([lesson], 'https://youtube.com/watch?v=script ok')).toEqual([])
+	})
+})
+
+describe('source filter', () => {
+	const yt = e({ id: 'y', title: 'Idempotency keys', source: { type: 'youtube', url: 'https://youtu.be/a', title: 'Payments deep dive', by: 'Hussein' } })
+	const ig = e({ id: 'i', title: 'Idempotency keys too', source: { type: 'instagram', url: 'https://www.instagram.com/reel/a/' } })
+	const none = e({ id: 'n', title: 'Idempotency keys again' })
+	it('parses source: as a filter', () => {
+		const q = parseBrainQuery('source:YouTube keys', NOW)
+		expect(q.filters.source).toBe('youtube')
+		expect(q.text).toBe('keys')
+		expect(q.filtered).toBe(true)
+		expect(describeFilters(q.filters)).toContain('source youtube')
+	})
+	it('keeps only entries from that source', () => {
+		expect(searchBrain([yt, ig, none], 'source:youtube idempotency').map((x) => x.e.id)).toEqual(['y'])
+		expect(searchBrain([yt, ig, none], 'source:youtube').map((x) => x.e.id)).toEqual(['y'])
+	})
+	it('finds words in the source title and author', () => {
+		expect(searchBrain([yt, none], 'Hussein').map((x) => x.e.id)).toEqual(['y'])
+		expect(searchBrain([yt, none], 'deep dive').map((x) => x.e.id)).toEqual(['y'])
+	})
+})
+
+describe('id, library and no-source filters', () => {
+	const a = e({ id: 'journal:l_1', title: 'A', source: { type: 'site', library: 'bridge/library/site/a' } })
+	const b = e({ id: 'z9', title: 'B' })
+	it('source:none keeps entries without a source', () => {
+		expect(searchBrain([a, b], 'source:none').map((x) => x.e.id)).toEqual(['z9'])
+		expect(describeFilters(parseBrainQuery('source:none').filters)).toContain('source none')
+	})
+	it('id: matches the full id and the short one', () => {
+		expect(searchBrain([a, b], 'id:journal:l_1').map((x) => x.e.id)).toEqual(['journal:l_1'])
+		expect(searchBrain([a, b], `id:${shortId('journal:l_1')}`).map((x) => x.e.id)).toEqual(['journal:l_1'])
+		expect(describeFilters(parseBrainQuery('id:z9').filters)).toContain('id z9')
+	})
+	it('library: takes the path with or without its prefix', () => {
+		expect(searchBrain([a, b], 'library:bridge/library/site/a').map((x) => x.e.id)).toEqual(['journal:l_1'])
+		expect(searchBrain([a, b], 'library:site/a').map((x) => x.e.id)).toEqual(['journal:l_1'])
+		expect(describeFilters(parseBrainQuery('library:site/a').filters)).toContain('library site/a')
+	})
+})
+
+describe('rankTitles', () => {
+	const items = [{ t: 'Cooking pasta' }, { t: 'Writing a script' }]
+	it('puts title matches first and joins word forms', () => {
+		expect(rankTitles(items, 'scripting', (i) => i.t)).toEqual([items[1]])
+	})
+	it('ignores filler and returns nothing for an empty query', () => {
+		expect(rankTitles(items, 'the a of', (i) => i.t)).toEqual([])
+		expect(rankTitles(items, '', (i) => i.t)).toEqual([])
+	})
+	it('ranks the better title first', () => {
+		const two = [{ t: 'pasta' }, { t: 'pasta script' }]
+		expect(rankTitles(two, 'pasta script', (i) => i.t)[0]).toBe(two[1])
+	})
+})
+
+describe('brain hashes', () => {
+	it('round-trips every form', () => {
+		for (const x of [{ ticket: 'PAY-2433' }, { project: 'acme/pay web' }, { query: '#retry source:youtube' }, { entry: 'journal:l_1' }]) {
+			expect(brainArg(brainHash(x).split('/').pop())).toEqual(x)
+		}
+		expect(brainHash({ ticket: 'PAY-1' })).toBe('#/brain/PAY-1')
+		expect(brainHash({})).toBe('#/brain')
+	})
+	it('keeps plain ticket links working', () => {
+		expect(brainArg('PAY-2433')).toEqual({ ticket: 'PAY-2433' })
+		expect(brainArg(undefined)).toEqual({})
 	})
 })

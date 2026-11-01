@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { brainIndex, brainRecord, openWork } from './brain-index'
 import { searchBrain } from './brain-query'
-import type { BridgeEntry } from './bridge'
+import { fold, type BridgeEntry } from './bridge'
 
 const entry: BridgeEntry = {
 	schema: 'workpulse.bridge.entry/1',
@@ -35,20 +35,33 @@ describe('brain records', () => {
 })
 
 describe('brain index', () => {
-	it('builds the index and a graph chained by ticket and tag', () => {
-		const other = { ...entry, id: 'e_other123', at: entry.at + 1, title: 'Production retry comparison', tags: ['retry'] }
-		const third = { ...entry, id: 'e_third123', at: entry.at + 2, ticket: undefined, tags: [], title: 'Unrelated' }
-		const { index, graph } = brainIndex([entry, other, third], entry.at + 10)
+	it('builds the index text and a version 3 graph', () => {
+		const { index, graph } = brainIndex([entry], entry.at + 10)
 		expect(index).toContain('Open next actions')
 		expect(index).toContain('records/cli-test/2026-10/')
-		const g = JSON.parse(graph)
-		expect(g.nodes).toHaveLength(3)
-		expect(g.edges.map((x: { kind: string }) => x.kind).sort()).toEqual(['tag', 'ticket'])
+		expect(JSON.parse(graph).version).toBe(3)
 	})
 
-	it('grows linearly: 2,000 entries on one ticket make 1,999 ticket edges', () => {
+	it('grows linearly: 2,000 entries on one ticket make 2,000 ticket edges and one ticket node', () => {
 		const many = Array.from({ length: 2000 }, (_, i) => ({ ...entry, id: `e_${i}`, at: entry.at + i, tags: [] }))
-		expect(JSON.parse(brainIndex(many).graph).edges).toHaveLength(1999)
+		const g = JSON.parse(brainIndex(many).graph)
+		expect(g.edges.filter((x: { kind: string }) => x.kind === 'ticket')).toHaveLength(2000)
+		expect(g.nodes.filter((x: { type: string }) => x.type === 'ticket')).toHaveLength(1)
+	})
+
+	it('a tag is one node whatever its case', () => {
+		const a = { ...entry, id: 'e_a', tags: ['Retry'] }
+		const b = { ...entry, id: 'e_b', tags: ['retry'] }
+		const g = JSON.parse(brainIndex([a, b]).graph)
+		expect(g.nodes.filter((x: { type: string }) => x.type === 'tag')).toHaveLength(1)
+	})
+
+	it('a deleted entry is not there, and the serialised graph holds no body text', () => {
+		const secret = { ...entry, id: 'e_body', body: 'zebra-unique-body-text' }
+		const kept = brainIndex([secret]).graph
+		expect(kept).not.toContain('zebra-unique-body-text')
+		const gone = fold({ 'a.jsonl': [JSON.stringify(secret), JSON.stringify({ ...secret, id: 'e_del', at: secret.at + 1, amends: 'e_body', state: 'deleted' })].join('\n') })
+		expect(JSON.parse(brainIndex(gone).graph).nodes).toHaveLength(0)
 	})
 })
 

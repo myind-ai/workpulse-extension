@@ -55,6 +55,12 @@ NEEDS_LOGIN = re.compile(r"log(ged)?[ -]?in|sign in|cookies|rate.?limit|private|
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+def source_type(info: dict) -> str:
+    """Library folder type for a video: youtube, instagram, or site for anything else."""
+    key = (info.get("extractor_key") or "").lower()
+    return "youtube" if key.startswith("youtube") else "instagram" if key.startswith("instagram") else "site"
+
+
 def slugify(text: str, max_len: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
     return slug[:max_len].rstrip("-") or "video"
@@ -312,6 +318,7 @@ def save(info: dict, root: Path, langs: list[str], video: bool, audio: bool,
         encoding="utf-8")
     meta = {k: info.get(k) for k in KEEP}
     meta.update(saved_at=dt.date.today().isoformat(), subtitles=track, words=words,
+                source_type=source_type(info),
                 video=next((p.name for p in folder.glob("video.*")), None),
                 available_subs={"manual": sorted((info.get("subtitles") or {}).keys()),
                                 "auto_orig": sorted(k for k in (info.get("automatic_captions") or {})
@@ -321,6 +328,7 @@ def save(info: dict, root: Path, langs: list[str], video: bool, audio: bool,
     info_file.unlink(missing_ok=True)
     stills = frames(folder, frames_every) if frames_every else None
     return {"id": info["id"], "title": info.get("title"), "folder": str(folder),
+            "source_type": source_type(info),
             "caption": (info.get("description") or "")[:500], "frames": stills,
             "transcript": str(folder / "transcript.md") if vtt else None, "words": words,
             "subtitles": track, "video": meta["video"], "chapters": len(info.get("chapters") or []),
@@ -437,10 +445,12 @@ def build_index(root: Path) -> Path:
         m = json.loads(meta_file.read_text(encoding="utf-8"))
         rel = meta_file.parent.name
         title = (m.get("title") or m["id"]).replace("|", "/")
+        # meta.json says what was downloaded; a folder restored from the text backup has no media.
+        has_video = bool(m.get("video")) and (meta_file.parent / Path(m["video"]).name).is_file()
         rows.append((m.get("saved_at", ""), f"| {m.get('saved_at', '')} | [{title}]({rel}/notes.md) | "
                      f"{(m.get('channel') or m.get('uploader') or '').replace('|', '/')} | {length(m)} | "
                      f"{(m.get('subtitles') or {}).get('kind', 'none')} | "
-                     f"{notes_status(meta_file.parent / 'notes.md')} | {'yes' if m.get('video') else 'no'} |"))
+                     f"{notes_status(meta_file.parent / 'notes.md')} | {'yes' if has_video else 'no'} |"))
     rows.sort(key=lambda r: r[0], reverse=True)
     text = ["# Video learning", "", f"Updated: {dt.date.today().isoformat()}",
             "Every video saved for learning, newest first. Each row opens that video's notes; "

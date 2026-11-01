@@ -1,7 +1,8 @@
 // Shared data model. Mirrors the desktop app's SQLite tables (src-tauri/src/db.rs)
 // so the phase 3 bridge can sync records by `uid`. Instants are epoch ms.
 
-import type { BridgeEntry } from './bridge'
+import type { BridgeEntry, SavedUrl } from './bridge'
+import type { LibraryItem } from './library'
 import type { Release } from './update'
 import type { NudgeKind } from './health'
 import type { Tier } from './licence'
@@ -440,6 +441,16 @@ export interface Runtime {
 		queue?: BridgeEntry[]
 		/** Work-log records already imported from Claude Code. */
 		importedWorklogs?: string[]
+		/** Imported work logs the person deleted here: the importer skips these, so they stay deleted. */
+		dismissedWorklogs?: string[]
+		/** The saved library, from the tree: meta only, never file text. */
+		library?: LibraryItem[]
+		/** Pages sent with Save to Brain from this browser, newest first (50), with where the CLI is with each. */
+		saved?: SavedUrl[]
+		/** The ack blob sha last read for each saved page, so a file is read once per sha. */
+		ackShas?: Record<string, string>
+		/** The last tree GitHub answered was cut short, so the lists may be incomplete. */
+		truncated?: boolean
 	}
 	/** The newest release GitHub reported, when it was asked, which one was dismissed, and the version that ran last. */
 	update?: { latest?: Release; checkedAt?: number; dismissed?: string; seen?: string; error?: string }

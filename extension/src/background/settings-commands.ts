@@ -34,6 +34,7 @@ export class SettingsCommands extends ReviewCommands {
 	 * left behind. Deliberately one day at a time and never automatic.
 	 */
 	async clearDay(date: string): Promise<void> {
+		await this.dismissWorklogs(await this.store.entries(date))
 		await this.store.setEntries(date, [])
 		await this.store.updateDay(date, { checkedInAt: undefined, checkedOutAt: undefined, isOff: false, timelogStatus: 'pending' })
 		await this.store.updateRuntime((r) => {

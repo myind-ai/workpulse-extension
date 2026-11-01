@@ -1,7 +1,7 @@
 {
   "name": "workpulse-brain",
   "displayName": "WorkPulse Brain",
-	"version": "1.6.3",
+	"version": "1.8.0",
   "description": "Private ticket memory and reviewable time logs for Claude Code, shared with the WorkPulse extension through your own GitHub repository. Zoho stays a visible extension action.",
   "author": { "name": "myind-ai", "url": "https://github.com/myind-ai" },
   "homepage": "https://github.com/myind-ai/workpulse-extension",

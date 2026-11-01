@@ -365,3 +365,49 @@ describe('never a cached answer', () => {
 		expect(await client(fetchFn, 'main').treeIfChanged('"v1"')).toBeNull()
 	})
 })
+
+describe('files over 1 MB', () => {
+	const big = `${'é'.repeat(700_000)}— end`
+	const bytes = new TextEncoder().encode(big)
+
+	// This pinned `read` to null when it was written. Real GitHub answers `encoding: none` over 1 MB, and a Brain
+	// file past that stopped updating with nobody told, while `send` took it for a new file: so `read` now fetches it.
+	it('read returns the whole text for a file over 1 MB, through its blob; readBlob does too', async () => {
+		let b64 = ''
+		for (let i = 0; i < bytes.length; i += 30000) b64 += btoa(String.fromCharCode(...bytes.slice(i, i + 30000)))
+		const fetchFn = vi.fn(async (url: string) => {
+			if (String(url).includes('/contents/')) return ok({ content: '', encoding: 'none', sha: 'big' })
+			if (String(url).includes('/git/blobs/big')) return ok({ content: b64.replace(/(.{60})/g, '$1\n'), encoding: 'base64', sha: 'big' })
+			return fail(404)
+		}) as unknown as typeof fetch
+		const gh = client(fetchFn, 'main')
+		expect(bytes.length).toBeGreaterThan(1_000_000)
+		expect(await gh.read('bridge/library/youtube/a/transcript.md')).toEqual({ text: big, sha: 'big' })
+		expect(await gh.readBlob('big')).toBe(big)
+	})
+
+	it('read of an empty file (empty content with a sha) gives an empty text, not "not there"', async () => {
+		const fetchFn = vi.fn(async (url: string) => (String(url).includes('/contents/') ? ok({ content: '', encoding: 'base64', sha: 'e69' }) : ok({ content: '', encoding: 'base64', sha: 'e69' }))) as unknown as typeof fetch
+		expect(await client(fetchFn, 'main').read('bridge/x.jsonl')).toEqual({ text: '', sha: 'e69' })
+	})
+
+	it('read says "not there" only when the file is not there', async () => {
+		expect(await client((async () => fail(404)) as unknown as typeof fetch, 'main').read('bridge/x.jsonl')).toBeNull()
+	})
+
+	it('read refuses when the file exists but its blob cannot be had, so a write can never take it for a new file', async () => {
+		const fetchFn = vi.fn(async (url: string) => (String(url).includes('/contents/') ? ok({ content: '', encoding: 'none', sha: 'big' }) : fail(404))) as unknown as typeof fetch
+		await expect(client(fetchFn, 'main').read('bridge/x.jsonl')).rejects.toThrow(/would not give its contents/)
+	})
+
+	it('readBlob gives null for a blob that is not there', async () => {
+		expect(await client((async () => fail(404)) as unknown as typeof fetch, 'main').readBlob('nope')).toBeNull()
+	})
+
+	it('treeIfChanged reports a truncated tree', async () => {
+		const fetchFn = vi.fn(async () => ok({ tree: [{ path: 'a', sha: 's', type: 'blob' }], truncated: true })) as unknown as typeof fetch
+		expect(await client(fetchFn, 'main').treeIfChanged()).toMatchObject({ truncated: true })
+		const fine = vi.fn(async () => ok({ tree: [] })) as unknown as typeof fetch
+		expect(await client(fine, 'main').treeIfChanged()).toMatchObject({ truncated: false })
+	})
+})

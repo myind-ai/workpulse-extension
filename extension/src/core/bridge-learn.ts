@@ -5,7 +5,7 @@
 // with Node's type stripping, which cannot follow extension-less imports, so it
 // imports nothing. Pure: no chrome, no fetch.
 
-import type { BridgeEntry } from './bridge'
+import { sourceOf, type BridgeEntry } from './bridge'
 import type { Learning, LearnKind } from './learn'
 import { istDate } from './time'
 
@@ -34,6 +34,7 @@ export function brainLearnings(entries: BridgeEntry[], tickets: { id: string; ke
 		if (e.id.startsWith('journal:')) continue
 		const kind = AS[e.kind]
 		if (!kind) continue
+		const source = sourceOf(e)
 		const why = e.rootCause ? ` — ${e.rootCause}` : ''
 		out.push({
 			id: `${BRAIN_ID}${e.id}`,
@@ -43,6 +44,7 @@ export function brainLearnings(entries: BridgeEntry[], tickets: { id: string; ke
 			text: `${e.title}${why}`,
 			tags: e.tags ?? [],
 			ticketId: e.ticket ? byKey.get(e.ticket) : undefined,
+			...(source ? { source } : {}),
 		})
 	}
 	return out

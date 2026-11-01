@@ -82,7 +82,9 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 	const pick = (full: string) =>
 		run(async () => {
 			await onPatch({ syncRepo: full })
-			setSaid(`Backing up to ${full}.`)
+			// Not refused: a public backup can be a choice. But it is said before the first write, while it can still be changed.
+			const seen = await call('checkSync').catch(() => null)
+			setSaid(seen && !seen.private ? `${full} is public: anyone can read what is written there. Pick a private repository unless that is what you want.` : `Backing up to ${full}.`)
 			await reload()
 		})
 

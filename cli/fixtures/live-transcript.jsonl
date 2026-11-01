@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Let me read the rule."},{"type":"tool_use","name":"Read","input":{"file_path":"/home/x/.claude/rule-files/gamma.md"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"rule text"}]}}
+{"type":"result","subtype":"success","result":"done"}

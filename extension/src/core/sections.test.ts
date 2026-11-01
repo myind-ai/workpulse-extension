@@ -45,3 +45,17 @@ describe('finding a section by name', () => {
 		}
 	})
 })
+
+describe('the library page', () => {
+	it('should be found by name and by what it holds', () => {
+		expect(findSections('library')[0].hash).toBe('#/library')
+		expect(titles('transcript')).toContain('Library')
+	})
+})
+
+describe('the graph page', () => {
+	it('should be found by name and by what it shows', () => {
+		expect(findSections('graph')[0].hash).toBe('#/graph')
+		expect(titles('connections')).toContain('Graph')
+	})
+})
