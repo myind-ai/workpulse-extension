@@ -41,6 +41,43 @@ export interface Backup {
  */
 const SECRET = new Set(['oauthClientId', 'email', 'syncToken', 'syncRepo'])
 
+/** What makes two copies of a record the same record. */
+function recordKey(x: unknown): string {
+	const r = (x ?? {}) as { id?: unknown; key?: unknown; date?: unknown; kind?: unknown }
+	if (r.id != null) return `id:${r.id}`
+	if (r.key != null) return `key:${r.key}`
+	if (r.date != null) return `date:${r.date}:${r.kind ?? ''}`
+	return `json:${JSON.stringify(x)}`
+}
+
+function union<T>(first: T[] = [], second: T[] = []): T[] {
+	const seen = new Set(first.map(recordKey))
+	return [...first, ...second.filter((x) => !seen.has(recordKey(x)))]
+}
+
+/**
+ * Two backups as one, losing nothing from either: every record on either side is kept, and where both have the same one, `first`'s copy wins.
+ * Restore and backing up over a repository both go through this, so neither can drop what only the other side held.
+ */
+export function mergeBackups(first: Backup, second: Backup): Backup {
+	const entries: Backup['entries'] = { ...second.entries }
+	for (const [date, list] of Object.entries(first.entries ?? {})) entries[date] = union(list, second.entries?.[date])
+	return {
+		...first,
+		learnings: union(first.learnings, second.learnings),
+		tickets: union(first.tickets, second.tickets),
+		jobs: union(first.jobs, second.jobs),
+		goals: union(first.goals, second.goals),
+		plans: union(first.plans, second.plans),
+		issues: union(first.issues, second.issues),
+		meetings: union(first.meetings, second.meetings),
+		tasks: union(first.tasks, second.tasks),
+		days: union(first.days, second.days),
+		pageNotes: union(first.pageNotes, second.pageNotes),
+		entries,
+	}
+}
+
 export function safeSettings(s: Settings): Partial<Settings> {
 	return Object.fromEntries(Object.entries(s).filter(([k]) => !SECRET.has(k))) as Partial<Settings>
 }

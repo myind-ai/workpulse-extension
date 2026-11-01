@@ -2719,6 +2719,66 @@ describe('a repository that already holds your backup', () => {
 		expect(commits).toHaveLength(1)
 	})
 
+	describe('a repository that already holds data', () => {
+		const inRepo = (id: string) => ({ id, date: '2026-10-01', text: `repo ${id}`, at: 1, tags: [] })
+		const shards: Record<string, unknown> = {
+			'workpulse/index.json': { version: 2, exportedAt: 5, counts: { days: 1, entries: 0, learnings: 2, tickets: 0 }, shards: { meta: 'workpulse/data/meta.json', learnings: ['workpulse/data/learnings/2026-10.json'], tickets: [], days: [] } },
+			'workpulse/data/meta.json': {},
+			'workpulse/data/learnings/2026-10.json': [inRepo('both'), inRepo('only-repo')],
+		}
+		const repoWithData = () => {
+			const trees: { base?: string; paths: string[] }[] = []
+			vi.stubGlobal('fetch', (async (url: string, init?: RequestInit) => {
+				const reply = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status })
+				const u = String(url)
+				const path = decodeURIComponent(u.split('/contents/')[1]?.split('?')[0] ?? '')
+				if (path) return path in shards ? reply({ content: btoa(unescape(encodeURIComponent(JSON.stringify(shards[path])))), encoding: 'base64', sha: 's' }) : reply({}, 404)
+				if (u.endsWith('/git/trees')) {
+					const body = JSON.parse(String(init?.body))
+					trees.push({ base: body.base_tree, paths: body.tree.map((e: { path: string }) => e.path) })
+					return reply({ sha: 't' })
+				}
+				if (u.includes('/git/ref/heads/main')) return reply({ object: { sha: 'head' } })
+				if (u.includes('/git/commits/head')) return reply({ tree: { sha: 'old-tree' } })
+				if (u.endsWith('/git/commits')) return reply({ sha: 'c' })
+				if (u.includes('/git/refs/heads/main')) return reply({})
+				return reply({ full_name: 'me/notes', private: true, permissions: { push: true }, default_branch: 'main' })
+			}) as unknown as typeof fetch)
+			return trees
+		}
+		const texts = async () => Object.fromEntries((await store.learnings()).map((l) => [l.id, l.text]))
+
+		it('should keep both sides on restore, the repository winning where they differ', async () => {
+			repoWithData()
+			await store.saveLearnings([{ ...inRepo('only-here'), text: 'mine' }, { ...inRepo('both'), text: 'older here' }] as never)
+			await cmd.restoreBackup()
+			expect(await texts()).toEqual({ both: 'repo both', 'only-repo': 'repo only-repo', 'only-here': 'mine' })
+		})
+
+		it('should carry the repository into the backup when combining, this browser winning, on top of what is there', async () => {
+			const trees = repoWithData()
+			await store.saveLearnings([{ ...inRepo('only-here'), text: 'mine' }, { ...inRepo('both'), text: 'newer here' }] as never)
+			await cmd.pushBackup({ overwrite: true })
+			expect(await texts()).toEqual({ both: 'newer here', 'only-repo': 'repo only-repo', 'only-here': 'mine' })
+			expect(trees[0].base).toBe('old-tree') // on top of the existing tree, so files it doesn't name stay
+			expect(trees[0].paths.every((p) => p.startsWith('workpulse/'))).toBe(true) // bridge/ and everything else is never named
+		})
+
+		it('should not let an empty browser empty the backup', async () => {
+			repoWithData()
+			await cmd.pushBackup({ overwrite: true })
+			expect(Object.keys(await texts()).sort()).toEqual(['both', 'only-repo'])
+		})
+
+		it('should write nothing when what is there can not be read', async () => {
+			const trees = repoWithData()
+			shards['workpulse/index.json'] = { ...(shards['workpulse/index.json'] as object), version: 99 }
+			await expect(cmd.pushBackup({ overwrite: true })).rejects.toThrow(/newer WorkPulse/)
+			expect(trees).toEqual([])
+			shards['workpulse/index.json'] = { ...(shards['workpulse/index.json'] as object), version: 2 }
+		})
+	})
+
 	it('should back up normally once it has been restored here', async () => {
 		const commits = github({ hasBackup: true })
 		await cmd.restoreBackup()

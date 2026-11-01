@@ -84,9 +84,9 @@ export class GitHub {
 	}
 
 	/** Who the token belongs to. Needs no permission beyond being a valid token. */
-	async me(): Promise<{ login: string }> {
-		const r = (await this.call('/user')) as { login: string }
-		return { login: r.login }
+	async me(): Promise<{ login: string; name: string; avatarUrl: string }> {
+		const r = (await this.call('/user')) as { login: string; name?: string | null; avatar_url?: string }
+		return { login: r.login, name: r.name ?? '', avatarUrl: r.avatar_url ?? '' }
 	}
 
 	/**
@@ -95,13 +95,15 @@ export class GitHub {
 	 * makes it the right list to choose from: anything in it is known to work.
 	 */
 	async repos(): Promise<{ full_name: string; private: boolean; canWrite: boolean; pushed_at?: string }[]> {
-		const r = (await this.call('/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator')) as {
-			full_name: string
-			private: boolean
-			permissions?: { push?: boolean }
-			pushed_at?: string
-		}[]
-		return r.map((x) => ({ full_name: x.full_name, private: x.private, canWrite: !!x.permissions?.push, pushed_at: x.pushed_at }))
+		type Listed = { full_name: string; private: boolean; permissions?: { push?: boolean }; pushed_at?: string }
+		const all: Listed[] = []
+		// GitHub gives 100 at a time, and a repository past the first page could not be picked. Five pages is plenty; the box below the list takes any name.
+		for (let page = 1; page <= 5; page++) {
+			const r = (await this.call(`/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator`)) as Listed[]
+			all.push(...r)
+			if (r.length < 100) break
+		}
+		return all.map((x) => ({ full_name: x.full_name, private: x.private, canWrite: !!x.permissions?.push, pushed_at: x.pushed_at }))
 	}
 
 	/** The repository's name and whether the token can write to it. */

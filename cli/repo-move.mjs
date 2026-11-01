@@ -118,7 +118,7 @@ export const afterMove = ({ from, to, branch }) =>
 		'',
 		'Left for you:',
 		'  1. In the extension (Settings → Backup → Change repository, token or schedule):',
-		`     point a token at ${to} (Contents: Read and write), choose ${to}${branch ? `, branch ${branch}` : ''}, and press Back up over it.`,
+		`     point a token at ${to} (Contents: Read and write), choose ${to}${branch ? `, branch ${branch}` : ''}, and press Combine and back up.`,
 		`  2. Then bring across anything the extension wrote in between: wp-brain move --catch-up`,
 		`  3. Any other computer: wp-brain init ${to}${branch ? ` --branch ${branch}` : ''}`,
 		`  4. If your CLAUDE.md names ${from}, change it to ${to}. wp-brain doctor says whether it does.`,

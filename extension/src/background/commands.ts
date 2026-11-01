@@ -82,7 +82,7 @@ import {
 	type Switches,
 } from '@/core/goals'
 import { standup, standupDate, standupText, type Standup } from '@/core/standup'
-import { backupDue, changedFiles, commitMessage, digestsOf, filesFor, parseRepo, safeSettings, syncTarget, type Backup, type Manifest } from '@/core/sync'
+import { backupDue, changedFiles, mergeBackups, commitMessage, digestsOf, filesFor, parseRepo, safeSettings, syncTarget, type Backup, type Manifest } from '@/core/sync'
 import { GitHub } from '@/lib/github'
 import { keyPattern, keysIn, labelFor, mergePreview, mergeWorkspaces, pageMenu, type MenuItem, type TicketRow } from '@/core/links'
 import { explain, localZone, type Conversion } from '@/core/timezone'
@@ -1927,8 +1927,15 @@ export class DayCommands {
 		const [s, token] = await Promise.all([this.store.settings(), this.store.syncToken()])
 		if (!token) throw new Error('Paste the token first.')
 		const gh = new GitHub(token, parseRepo(s.syncRepo) ?? { owner: 'x', repo: 'x' })
-		const [me, repos] = await Promise.all([gh.me().catch(() => ({ login: '' })), gh.repos()])
+		const [me, repos] = await Promise.all([gh.me().catch(() => ({ login: '', name: '', avatarUrl: '' })), gh.repos()])
 		return { login: me.login, repos: repos.filter((r) => r.canWrite) }
+	}
+
+	/** Who the saved token belongs to, for the Backup page. A refused token throws. */
+	async githubProfile(): Promise<{ login: string; name: string; avatarUrl: string }> {
+		const [s, token] = await Promise.all([this.store.settings(), this.store.syncToken()])
+		if (!token) throw new Error('Paste the token first.')
+		return new GitHub(token, parseRepo(s.syncRepo) ?? { owner: 'x', repo: 'x' }).me()
 	}
 
 	/** Names the repository and says whether the token can actually write to it. */
@@ -1978,9 +1985,12 @@ export class DayCommands {
 			const there = await this.existingBackup()
 			if (there.exists) {
 				const what = there.counts.learnings || there.counts.tickets ? ` (${there.counts.learnings} learnings, ${there.counts.tickets} tickets)` : ''
-				throw new Error(`${s.syncRepo} already has a WorkPulse backup${what}. Restore it here first, or choose Back up over it.`)
+				throw new Error(`${s.syncRepo} already has a WorkPulse backup${what}. Restore it here first, or choose Combine and back up.`)
 			}
 		}
+		// What is already in the repository stays: it is brought in here first, so the backup below holds both sides.
+		// A backup that can't be read stops this: writing over something unread could lose it.
+		if (opts.overwrite && (await this.existingBackup()).exists) await this.applyBackup(mergeBackups(await this.backup(), await this.readBackup()))
 		const data = await this.backup()
 		// Recordings are fetched one at a time and only the kept ones: a handful
 		// of megabytes each, and no reason for the rest to pass through here.
@@ -2015,8 +2025,8 @@ export class DayCommands {
 	}
 
 	/**
-	 * Reads the backup back. Replaces what it covers and leaves the rest alone;
-	 * the token and anything else private was never in there to restore.
+	 * Reads the backup back and combines it with what is here: the repository's copy wins where both have a
+	 * record, and what only this browser holds stays. The token and anything else private was never in there to restore.
 	 *
 	 * The manifest says which shards to read, so a thousand days comes back as
 	 * thirty-odd month files rather than one enormous one. A repository written
@@ -2026,7 +2036,7 @@ export class DayCommands {
 	async restoreBackup(): Promise<{ learnings: number; tickets: number; days: number }> {
 		const s = await this.store.settings()
 		const target = syncTarget(s.syncRepo, s.syncBranch, s.syncPath)
-		const out = await this.readBackupIn()
+		const out = await this.applyBackup(mergeBackups(await this.readBackup(), await this.backup()))
 		// This browser now holds that backup, so its next one is an update of it rather than a stranger
 		// writing over it. No file hashes yet: the next backup writes every file once.
 		await this.store.updateRuntime((r) => void (r.sync = { ...r.sync, target, files: {}, at: r.sync?.target === target ? r.sync.at : undefined, error: undefined }))
@@ -2034,7 +2044,7 @@ export class DayCommands {
 		return out
 	}
 
-	private async readBackupIn(): Promise<{ learnings: number; tickets: number; days: number }> {
+	private async readBackup(): Promise<Backup> {
 		const gh = await this.github()
 		const dir = ((await this.store.settings()).syncPath || 'workpulse').replace(/^\/+|\/+$/g, '')
 
@@ -2052,7 +2062,7 @@ export class DayCommands {
 		if (!manifest) {
 			const old = await read<Backup>(`${dir}/backup.json`)
 			if (!old) throw new Error('Nothing to restore from in that repository yet — push a backup first.')
-			return this.applyBackup(old)
+			return old
 		}
 		if (manifest.version !== 2) throw new Error(`That backup was written by a newer WorkPulse (version ${manifest.version}).`)
 
@@ -2090,7 +2100,7 @@ export class DayCommands {
 			}
 		}
 
-		return this.applyBackup({
+		return {
 			pageNotes,
 			version: 1,
 			exportedAt: manifest.exportedAt,
@@ -2105,7 +2115,7 @@ export class DayCommands {
 			plans,
 			entries,
 			days,
-		})
+		}
 	}
 
 	/** Writes a read-back backup over what is here. Settings are left alone. */

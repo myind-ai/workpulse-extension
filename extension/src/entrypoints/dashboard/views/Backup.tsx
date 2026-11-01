@@ -19,6 +19,21 @@ import { Art } from '@/ui/Art'
 
 type Patch = (patch: Partial<Settings>) => Promise<void>
 
+/** Who the token belongs to, in GitHub's own words; a token GitHub refuses says so here rather than at the first backup. */
+function Connected({ profile }: { profile: { login: string; name: string; avatarUrl: string } | 'refused' | null }) {
+	if (!profile) return null
+	if (profile === 'refused') return <div className="wp-banner">GitHub did not accept this token. It may have expired or been revoked: paste a new one below.</div>
+	return (
+		<div className="wp-row wp-small" style={{ alignItems: 'center', gap: 8, marginBottom: 6 }}>
+			{profile.avatarUrl && <img src={profile.avatarUrl} alt="" width={28} height={28} referrerPolicy="no-referrer" style={{ borderRadius: '50%' }} />}
+			<span>
+				Connected as <strong>{profile.name || profile.login}</strong>
+				{profile.name && <span className="wp-muted"> @{profile.login}</span>}
+			</span>
+		</div>
+	)
+}
+
 export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Patch }) {
 	const { data: state, reload } = useLive(() => call('syncState'))
 	const [name, setName] = useState('workpulse-notes')
@@ -30,6 +45,13 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 	// actually confirms the repository exists, against GitHub's own list.
 	const [madeRepo, setMadeRepo] = useState(false)
 	const { busy, error, run } = useAction()
+	const [profile, setProfile] = useState<{ login: string; name: string; avatarUrl: string } | 'refused' | null>(null)
+	useEffect(() => {
+		if (!state?.hasToken) return setProfile(null)
+		void call('githubProfile')
+			.then(setProfile)
+			.catch(() => setProfile('refused'))
+	}, [state?.hasToken])
 
 	// As soon as there is a token, the list it can reach is fetched — an empty
 	// box and a button called "List mine" is a question nobody can answer.
@@ -69,13 +91,13 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 			// Asking "shall we use the only repository you allowed?" is a dialog
 			// with one answer — so it is chosen, said out loud, and changeable on
 			// the screen that follows.
-			const only = r.repos.length === 1 ? r.repos[0] : null
+			// The same goes for one carrying the name step 1 made, when none is chosen yet.
+			const only = r.repos.length === 1 ? r.repos[0] : !state?.repo ? r.repos.find((x) => x.full_name.toLowerCase() === `${r.login}/${name}`.toLowerCase()) : undefined
 			if (only) {
 				await onPatch({ syncRepo: only.full_name })
-				setSaid(`Backing up to ${only.full_name}${only.private ? ' (private)' : ''} — the only repository this token can write to. Change it below if that is wrong.`)
-			} else {
-				setSaid(`Token accepted${r.login ? ` for ${r.login}` : ''} — ${r.repos.length} repositories to choose from.`)
-			}
+				setSaid(`Connected. Backing up to ${only.full_name}${only.private ? ' (private)' : ''}. Change it below if that is wrong.`)
+			} else setSaid('Connected. Choose the repository below.')
+			setProfile(await call('githubProfile').catch(() => 'refused' as const))
 			await reload()
 		})
 
@@ -120,8 +142,8 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 			    token into anything. Said before the first step, not buried under it. */}
 			<ul className="wp-assure">
 				<li>
-					<strong>One repository, and only that one.</strong> The token is scoped to the single repository you pick. WorkPulse cannot see, read or write any of your other
-					repositories, your account, or anything else on GitHub — and it never asks for more.
+					<strong>One repository, and only that one.</strong> WorkPulse reads and writes only the repository you pick, and nothing else on your GitHub account. It keeps a token on
+					this computer and asks for nothing more.
 				</li>
 				<li>
 					<strong>Private is fine, and what we suggest.</strong> The button below creates it private. A private repository works exactly the same: GitHub's API does not care,
@@ -146,6 +168,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 				<div className="wp-stack-sm">
 					{/* The one screen that says the whole arrangement back to you, so
 					    nothing about it has to be taken on trust. */}
+					<Connected profile={profile} />
 					<div className="wp-assure" style={{ background: 'var(--wp-ok-soft)', borderColor: 'transparent' }}>
 						<span>
 							<strong>You are backed up.</strong> Everything WorkPulse knows is in{' '}
@@ -182,7 +205,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 						<ConfirmButton
 							className="wp-btn wp-btn-sm"
 							label="Restore from it"
-							question="This replaces the learnings, tickets, tasks and time logs on this machine with the ones in the repository."
+							question="This brings the learnings, tickets, tasks and time logs from the repository into this browser. What only this browser holds stays."
 							confirmLabel="Replace what is here"
 							disabled={busy}
 							onConfirm={() =>
@@ -217,6 +240,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 				</div>
 			) : (
 				<ol className="wp-steps">
+					<Connected profile={profile} />
 					<Step n={1} title="Make the repository" active={step === 'repo'} done={step !== 'repo'}>
 						<p className="wp-muted wp-small">
 							It has to exist before a token can be limited to it. This opens GitHub's own form, already filled in and set to private — you are signed in, so it is one click
@@ -252,7 +276,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 						</div>
 					</Step>
 
-					<Step n={2} title={state.hasToken ? 'Token saved' : 'Make a token for it'} active={step === 'token' || step === 'repo'} done={state.hasToken}>
+					<Step n={2} title={state.hasToken ? 'Connected to GitHub' : 'Make a token for it'} active={step === 'token' || step === 'repo'} done={state.hasToken}>
 						<p className="wp-muted wp-small">
 							The page this opens is already filled in: name <em>WorkPulse Brain</em>, <strong>Contents: Read and write</strong>, 90 days. One thing is left for you:
 						</p>
@@ -298,24 +322,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 							<span className="wp-muted wp-small">Asking GitHub which repositories this token can write to…</span>
 						) : repos?.length ? (
 							<div className="wp-stack-sm wp-small">
-								{/* One repository means the token was scoped the way step 2 asked
-								    for. More than one means it was not, and that is worth saying:
-								    a backup token should not be able to write to everything you
-								    own. It still works — it is just wider than it needs to be. */}
-								{repos.length > 1 ? (
-									<div className="wp-banner">
-										<span className="wp-grow">
-											This token can write to <strong>{repos.length} repositories</strong>, so it was made with <em>All repositories</em> rather than{' '}
-											<em>Only select repositories</em>. It works, but it is wider than WorkPulse needs.{' '}
-											<a className="wp-link" href={TOKEN_URL} target="_blank" rel="noreferrer">
-												Make a narrower one
-											</a>{' '}
-											and paste it above, or carry on and pick below.
-										</span>
-									</div>
-								) : (
-									<span className="wp-muted">The one repository this token can write to:</span>
-								)}
+								<span className="wp-muted">WorkPulse writes only to the repository you choose:</span>
 								<div className="wp-stack-sm wp-scroll-sm">
 								{/* The token's own list: anything here is known to work. */}
 								{/* The one you named in step 1 first, since that is the one you
@@ -428,7 +435,7 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 									<ConfirmButton
 										className="wp-btn wp-btn-sm wp-btn-primary"
 										label="Restore it here"
-										question="This replaces the learnings, tickets, tasks and time logs in this browser with the ones in the repository."
+										question="This brings the learnings, tickets, tasks and time logs from the repository into this browser. What only this browser holds stays."
 										confirmLabel="Restore"
 										disabled={busy}
 										onConfirm={() =>
@@ -442,9 +449,9 @@ export function Backup({ settings, onPatch }: { settings: Settings; onPatch: Pat
 									/>
 									<ConfirmButton
 										className="wp-btn wp-btn-sm wp-btn-ghost"
-										label="Back up over it"
-										question="This writes what this browser has over the backup in the repository. Earlier versions stay in its git history."
-										confirmLabel="Write over it"
+										label="Combine and back up"
+										question="This combines this browser with the backup in the repository and saves both. Nothing on either side is dropped, and earlier versions stay in git history."
+										confirmLabel="Combine"
 										disabled={busy}
 										onConfirm={() =>
 											run(async () => {
