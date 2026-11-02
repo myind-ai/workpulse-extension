@@ -71,6 +71,33 @@ Then `/mcp` → **atlassian** → sign in. When you open a PR, Claude offers the
 asks before writing anything. One person per team says *"set up jira ticket updates"* and commits the file it
 writes. See [the explainer](docs/guides/jira-ticket-update-setup.md).
 
+## Set it up on another computer
+
+Same Brain, skills, rules and notes on a second computer: install the three plugins, link to your existing
+repository, restore, then press **Restore it here** in the extension.
+
+```text
+/plugin marketplace add myind-ai/workpulse-extension
+/plugin install workpulse-brain@workpulse
+/plugin install youtube-learning@workpulse
+/plugin install jira-ticket-update@workpulse
+```
+
+```bash
+WP="$(ls -t ~/.claude/plugins/cache/*/workpulse-brain/*/cli/wp-brain.mjs | head -1)"
+node "$WP" connect --repo you/workpulse-notes --use skills
+node "$WP" config restore --from cli-<first-computer>
+node "$WP" library restore
+node "$WP" doctor
+```
+
+Every step, what moves and what doesn't, and how the recording works from then on:
+[docs/guides/new-computer-setup.md](docs/guides/new-computer-setup.md).
+
+**Optional: save videos for learning.** `/plugin install youtube-learning@workpulse` (needs `yt-dlp` and `ffmpeg`):
+paste a YouTube or Instagram link and it saves the video, subtitles and a transcript, writes notes, and sends the
+takeaways to the Brain. See [plugins/youtube-learning/README.md](plugins/youtube-learning/README.md).
+
 ## Install from source
 
 ```bash
